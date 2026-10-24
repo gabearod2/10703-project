@@ -1,4 +1,17 @@
-# IIG-RL-Benchmark
+# 10-703 Project: PPO in Imperfect-Information Games
+
+Course project for CMU 10-703 (Deep Reinforcement Learning & Control).
+
+This repo builds on:
+- [IIG-RL-Benchmark](https://github.com/nathanlct/IIG-RL-Benchmark) for the training code, and
+- [exp-a-spiel](https://github.com/gabrfarina/exp-a-spiel) (`eas/`, a git submodule) for exact exploitability.
+
+To get running, follow the [Installation](#installation) steps below. They include a
+small patch to `eas` (see [Required patch to eas](#required-patch-to-eas-easpyprojecttoml)).
+
+---
+
+# Upstream README: IIG-RL-Benchmark
 
 IIG-RL-Benchmark is a library for running game theoretical and deep RL algorithms on [OpenSpiel](https://github.com/google-deepmind/open_spiel) games. Furthermore, we compute exact exploitability using the [exp-a-spiel](https://github.com/gabrfarina/exp-a-spiel) library which currently supports Phantom Tic-Tac-Toe and 3x3 Dark Hex, as well as their abrupt versions.
 
@@ -30,6 +43,9 @@ cd IIG-RL-Benchmark
 git submodule init
 git submodule update
 
+# Patch eas for newer scikit-build-core (see "Required patch to eas" below)
+sed -i 's/^cmake\.\(targets\|verbose\)/build.\1/' eas/pyproject.toml
+
 # This will install eas and its dependencies. Make sure to do this from the top level repo.
 pixi install
 pixi shell
@@ -42,6 +58,33 @@ pip install https://github.com/nathanlct/open_spiel/releases/download/v1.pttt/op
 # Lastly, install the other requirements
 pip install -r requirements.txt
 ```
+
+### Required patch to eas (`eas/pyproject.toml`)
+
+`pixi install` fails on a fresh clone because `eas/pyproject.toml` (upstream commit `2d83a35`) uses
+scikit-build-core option names that were renamed in scikit-build-core 0.10. The build stops with:
+
+```
+ERROR: Use build.verbose instead of cmake.verbose for scikit-build-core >= 0.10
+```
+
+The fix is to rename two keys under `[tool.scikit-build]` in `eas/pyproject.toml`:
+
+```diff
+ [tool.scikit-build]
+-cmake.targets = ["pyeas"]
+-cmake.verbose = true
++build.targets = ["pyeas"]
++build.verbose = true
+```
+
+Nothing else in that file needs to change, and we did not pin `scikit-build-core`.
+The `sed` command in the Installation steps above applies this edit.
+
+`eas` is a git submodule pointing at upstream (we did not fork it), so this edit
+is **not committed to this repo**. After applying it, `git status` will show `eas` as having
+modified content. That is expected. Do not commit it, and re-apply the patch if you
+re-clone or reset the submodule (`git submodule update --force`).
 
 ### Installing exp-a-spiel on MacOS
 
