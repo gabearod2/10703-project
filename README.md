@@ -1,4 +1,4 @@
-# 10-703 Project: PPO in Imperfect-Information Games
+## 10-703 Project: PPO in Imperfect-Information Games
 
 Course project for CMU 10-703 (Deep Reinforcement Learning & Control).
 
@@ -11,7 +11,7 @@ small patch to `eas` (see [Required patch to eas](#required-patch-to-eas-easpypr
 
 ---
 
-# Upstream README: IIG-RL-Benchmark
+## Upstream README: IIG-RL-Benchmark
 
 IIG-RL-Benchmark is a library for running game theoretical and deep RL algorithms on [OpenSpiel](https://github.com/google-deepmind/open_spiel) games. Furthermore, we compute exact exploitability using the [exp-a-spiel](https://github.com/gabrfarina/exp-a-spiel) library which currently supports Phantom Tic-Tac-Toe and 3x3 Dark Hex, as well as their abrupt versions.
 
