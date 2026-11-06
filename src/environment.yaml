@@ -1,0 +1,13 @@
+name: rl_project_env
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  - pip:
+      - torch
+      - numpy
+      - matplotlib
+      - gymnasium
+      - pettingzoo
+      - mpe2
