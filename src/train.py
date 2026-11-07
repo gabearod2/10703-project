@@ -9,6 +9,7 @@ Per iteration:  collect_rollout (algos/rollout.py) -> compute_gae -> PPO.update 
 """
 import argparse, json, os, time
 from datetime import datetime
+from uuid import uuid4
 import numpy as np
 import torch
 
@@ -41,7 +42,8 @@ def train(args):
           f"{num_iters} iterations, device={device}")
 
     log = {k: [] for k in ["iter", "env_steps", "ep_ret_adv", "ep_ret_good", "loss", "policy_loss", "value_loss",
-                           "entropy", "kl", "clipfrac", "explained_var", "std", "lr", "sps"]}
+                           "entropy", "kl", "kl_exact_final", "kl_coef_used", "kl_coef_next", "kl_penalty",
+                           "clipfrac", "explained_var", "std", "lr", "sps"]}
     log["eval"] = []
     obs_np = env.reset()
     recent = []                                        # finished-episode returns [adv, good]
@@ -73,6 +75,9 @@ def train(args):
             print(f"[it {it:>4d} | {env_steps:>8d} steps] ret adv {m['ep_ret_adv']:>6.1f} good {m['ep_ret_good']:>6.1f} | "
                   f"H {m['entropy']:>5.2f} std {m['std']:.2f} KL {m['kl']:.4f} clip {m['clipfrac']:.2f} "
                   f"V {m['value_loss']:.3f} EV {m['explained_var']:.2f} | {m['sps']:.0f} sps")
+            if args.adaptive_kl:
+                print(f"   KL final {m['kl_exact_final']:.5f} target {args.kl_target:g} | "
+                      f"beta {m['kl_coef_used']:g} -> {m['kl_coef_next']:g} | penalty {m['kl_penalty']:.5f}")
 
         if args.eval_every > 0 and (it % args.eval_every == 0 or it == num_iters):
             ev = evaluate(policy, args.eval_episodes, args.max_cycles, device=device, symmetric=args.symmetric)
@@ -90,6 +95,26 @@ def train(args):
     return policy, log
 
 
+def create_run_dir(out_dir):
+    """Reserve a unique run directory, even for simultaneous trials sharing a root."""
+    os.makedirs(out_dir, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    while True:
+        path = os.path.join(out_dir, f"{timestamp}-{uuid4().hex}")
+        try:
+            os.mkdir(path)  # Exclusive creation; never reuse another trial's directory.
+        except FileExistsError:
+            continue
+        return path
+
+
+def positive_float(value):
+    value = float(value)
+    if not np.isfinite(value) or value <= 0:
+        raise argparse.ArgumentTypeError("must be finite and positive")
+    return value
+
+
 def get_args(argv=None):
     p = argparse.ArgumentParser("Self-play PPO (Gaussian) on 1v1 MPE2 Simple Tag")
     p.add_argument("--total_steps", type=int, default=2_000_000, help="env steps (per-env transitions, summed over envs)")
@@ -104,13 +129,22 @@ def get_args(argv=None):
     p.add_argument("--gae_lambda", type=float, default=0.95)
     p.add_argument("--num_minibatches", type=int, default=4)
     p.add_argument("--update_epochs", type=int, default=4)
-    p.add_argument("--clip_coef", type=float, default=0.1)
+    p.add_argument("--clip_coef", type=float, default=0.1, help="shared policy and value clipping threshold")
+    p.add_argument("--clip_policy", type=lambda s: s.lower() != "false", default=True,
+                   help="enable policy-ratio clipping (true/false); independent of --clip_vloss")
+    p.add_argument("--adaptive_kl", type=lambda s: s.lower() != "false", default=False,
+                   help="enable the adaptive Gaussian KL penalty (true/false)")
+    p.add_argument("--kl_target", type=positive_float, default=0.01,
+                   help="target final KL for penalty adaptation; separate from --target_kl early stopping")
+    p.add_argument("--kl_coef_init", type=positive_float, default=1.0,
+                   help="initial adaptive KL penalty coefficient")
     p.add_argument("--ent_coef", type=float, default=0.05)
     p.add_argument("--vf_coef", type=float, default=0.5)
     p.add_argument("--max_grad_norm", type=float, default=0.5)
     p.add_argument("--norm_adv", type=lambda s: s.lower() != "false", default=True)
     p.add_argument("--clip_vloss", type=lambda s: s.lower() != "false", default=True)
-    p.add_argument("--target_kl", type=float, default=None)
+    p.add_argument("--target_kl", type=float, default=None,
+                   help="optional approximate-KL early stopping threshold; independent of penalty adaptation")
     p.add_argument("--hidden", type=int, nargs="+", default=[512, 512, 512])
     p.add_argument("--init_log_std", type=float, default=-0.5)
     p.add_argument("--learner", choices=["both", "adv", "good"], default="both",
@@ -124,8 +158,7 @@ def get_args(argv=None):
     p.add_argument("--eval_episodes", type=int, default=50)
     p.add_argument("--out_dir", type=str, default="runs/selfplay_ppo")
     a = p.parse_args(argv)
-    a.out_dir = os.path.join(a.out_dir, datetime.now().strftime("%Y%m%d-%H%M%S"))
-    os.makedirs(a.out_dir, exist_ok=True)
+    a.out_dir = create_run_dir(a.out_dir)
     return a
 
 
