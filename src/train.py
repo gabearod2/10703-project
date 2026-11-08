@@ -42,7 +42,7 @@ def train(args):
           f"{num_iters} iterations, device={device}")
 
     log = {k: [] for k in ["iter", "env_steps", "ep_ret_adv", "ep_ret_good", "loss", "policy_loss", "value_loss",
-                           "entropy", "kl", "kl_exact_final", "kl_coef_used", "kl_coef_next", "kl_penalty",
+                           "entropy", "kl", "penalty_distance_final", "kl_exact_final", "penalty_coef_used", "penalty_coef_next", "penalty_loss",
                            "clipfrac", "explained_var", "std", "lr", "sps"]}
     log["eval"] = []
     obs_np = env.reset()
@@ -75,9 +75,9 @@ def train(args):
             print(f"[it {it:>4d} | {env_steps:>8d} steps] ret adv {m['ep_ret_adv']:>6.1f} good {m['ep_ret_good']:>6.1f} | "
                   f"H {m['entropy']:>5.2f} std {m['std']:.2f} KL {m['kl']:.4f} clip {m['clipfrac']:.2f} "
                   f"V {m['value_loss']:.3f} EV {m['explained_var']:.2f} | {m['sps']:.0f} sps")
-            if args.adaptive_kl:
-                print(f"   KL final {m['kl_exact_final']:.5f} target {args.kl_target:g} | "
-                      f"beta {m['kl_coef_used']:g} -> {m['kl_coef_next']:g} | penalty {m['kl_penalty']:.5f}")
+            if args.penalty != "none":
+                print(f"   {args.penalty} final {m['penalty_distance_final']:.5f} target {args.penalty_target:g} | "
+                      f"beta {m['penalty_coef_used']:g} -> {m['penalty_coef_next']:g} | penalty {m['penalty_loss']:.5f}")
 
         if args.eval_every > 0 and (it % args.eval_every == 0 or it == num_iters):
             ev = evaluate(policy, args.eval_episodes, args.max_cycles, device=device, symmetric=args.symmetric)
@@ -132,12 +132,12 @@ def get_args(argv=None):
     p.add_argument("--clip_coef", type=float, default=0.1, help="shared policy and value clipping threshold")
     p.add_argument("--clip_policy", type=lambda s: s.lower() != "false", default=True,
                    help="enable policy-ratio clipping (true/false); independent of --clip_vloss")
-    p.add_argument("--adaptive_kl", type=lambda s: s.lower() != "false", default=False,
-                   help="enable the adaptive Gaussian KL penalty (true/false)")
-    p.add_argument("--kl_target", type=positive_float, default=0.01,
-                   help="target final KL for penalty adaptation; separate from --target_kl early stopping")
-    p.add_argument("--kl_coef_init", type=positive_float, default=1.0,
-                   help="initial adaptive KL penalty coefficient")
+    p.add_argument("--penalty", choices=["none", "kl", "wasserstein-2"], default="none",
+                   help="adaptive Gaussian distance penalty (default: none)")
+    p.add_argument("--penalty_target", type=positive_float, default=0.01,
+                   help="target final selected distance for penalty adaptation; separate from --target_kl early stopping")
+    p.add_argument("--penalty_coef_init", type=positive_float, default=1.0,
+                   help="initial adaptive distance penalty coefficient")
     p.add_argument("--ent_coef", type=float, default=0.05)
     p.add_argument("--vf_coef", type=float, default=0.5)
     p.add_argument("--max_grad_norm", type=float, default=0.5)
