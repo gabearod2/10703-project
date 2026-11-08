@@ -60,4 +60,28 @@ With `--adaptive_kl true`, the minimized loss adds `beta * mean(KL(old || new))`
 `kl` remains the approximate KL averaged during optimization. `clipfrac` remains the fraction of
 sampled ratios outside the clipping interval, even when policy clipping is disabled.
 
+## Evaluation: exploitability and cross-play (`exploit.py`)
+
+```bash
+# train a best response (BR) per role against a frozen checkpoint; NashConv = sum_i [u_i(BR_i, pi_-i) - u_i(pi)]
+python exploit.py nashconv --ckpt runs/sp_s0/<run>/final.pt --br_steps 1000000 --br_seeds 2
+python exploit.py nashconv --ckpt <ckpt> --br_args "--ent_coef 0.0"        # extra train.py flags for the BR
+
+# chaser-vs-runner return matrix between checkpoints (rows = chaser from ckpt i, cols = runner from ckpt j)
+python exploit.py crossplay --ckpts runs/a/final.pt runs/b/final.pt --out results/crossplay
+```
+
+`nashconv` writes `<run dir>/exploit/exploitability.json` (BR value, policy value, gap and per-seed candidates for each role).
+The BR is trained with PPO, so the number is a **lower bound** on true exploitability: check that the BR is not undertrained
+(a chaser/runner BR that scores below the policy's own value is clamped to a gap of 0, and `gap_raw` keeps the unclamped value).
+By default the BR is warm-started from the checkpoint (`--br_init warm`, i.e. `train.py --init_ckpt`), so it never starts below
+the policy; `--br_init scratch` trains from random init, which needs about the budget of the original self-play run.
+Gaps smaller than the printed standard errors are noise: increase `--episodes` and `--br_steps` before reading anything into them.
+The frozen policy samples actions by default (the policy as trained); `--opp_deterministic` plays its mean.
+Returns are per 25-step episode. BR seeds are selected on `--eval_seed` episodes and reported on fresh `--report_seed` episodes.
+
+The same machinery is available directly: `python train.py --learner adv --opponent ckpt --opponent_ckpt <ckpt or run dir>`
+trains one role against a frozen checkpoint, and `utils.evaluate.play_match(adv_ctrl, good_ctrl)` plays any two controllers
+(`opponents.PolicyOpponent`, scripted, random) against each other. Tests: `python tests/test_eval.py`.
+
 `hw3_reference/` holds the original HW3 starter code (Bronars & Jang), used only by the tests.

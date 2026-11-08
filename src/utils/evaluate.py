@@ -36,3 +36,26 @@ def evaluate(policy, num_episodes=50, max_cycles=25, seed=12345, device="cpu", s
         env.close()
         out[name + "_adv"], out[name + "_good"] = float(total[:, ADV].mean()), float(total[:, GOOD].mean())
     return out
+
+
+@torch.no_grad()
+def play_match(adv_ctrl, good_ctrl, num_episodes=100, max_cycles=25, seed=12345, symmetric=True):
+    """Mean return when `adv_ctrl` plays the chaser and `good_ctrl` the runner.
+
+    Controllers are callables: encoded obs [N, D] -> env actions [N, A] (PolicyOpponent, scripted, random...).
+    Env seeds are fixed by `seed`, so different matchups see the same initial states (common random numbers).
+    Returns {"adv", "good", "adv_se", "good_se"}: mean and standard error over episodes of the episode return.
+    """
+    n = num_episodes
+    env = TagVecEnv(num_envs=n, max_cycles=max_cycles, seed=seed, symmetric=symmetric)
+    obs, total = env.reset(), np.zeros((n, 2))
+    for _ in range(max_cycles):
+        a_env = np.zeros((n, 2, env.act_dim), dtype=np.float32)
+        a_env[:, ADV], a_env[:, GOOD] = adv_ctrl(obs[:, ADV]), good_ctrl(obs[:, GOOD])
+        res = env.step(a_env)
+        total += res["reward"]
+        obs = res["obs"]
+    env.close()
+    se = total.std(axis=0, ddof=1) / np.sqrt(n) if n > 1 else np.zeros(2)
+    return {"adv": float(total[:, ADV].mean()), "good": float(total[:, GOOD].mean()),
+            "adv_se": float(se[ADV]), "good_se": float(se[GOOD])}
