@@ -118,7 +118,7 @@ def test_nashconv_smoke():
 
 def test_crossplay():
     paths = [save_tiny(s)[1] for s in (4, 5)] + [save_tiny(4)[1]]   # third == first (same seed -> same weights)
-    M = exploit.crossplay(paths, episodes=6, deterministic=True, out=os.path.join(tempfile.mkdtemp(), "cp"))
+    M = exploit.crossplay(paths, episodes=6, deterministic=True, out=os.path.join(tempfile.mkdtemp(), "new_dir", "cp"))   # parent dir does not exist yet
     assert M.shape == (3, 3, 2)
     assert np.allclose(M[0], M[2]) and np.allclose(M[:, 0], M[:, 2])
     assert not np.allclose(M[0], M[1])                               # different checkpoints really play differently
