@@ -130,8 +130,11 @@ Results go to `<run dir>/exploit/exploitability.json`. Top level: `ckpt`, `br_st
 - **It is a lower bound.** PPO may not find the true best response. Check the BR's `training_curves.png`
   (`exploit/br_<role>_s<seed>/<run>/`): if its return is still rising, or seeds disagree (`candidates` in the JSON), raise
   `--br_steps` / `--br_seeds` before trusting the gap.
-- **BR hyperparameters matter.** Pass them with `--br_args`, e.g. `--br_args "--ent_coef 0.0"`. The default entropy bonus can
-  keep inflating the action std during BR training, which may handicap the BR (suspected, not yet verified).
+- **BR hyperparameters can be changed** with `--br_args`, e.g. `--br_args "--ent_coef 0.0"`. With the default entropy bonus the
+  action std keeps growing during BR training (about 9 to 20 over 1M steps); with `--ent_coef 0.0` it stays flat. On one
+  checkpoint (seed 0, 3M steps) this did not noticeably change NashConv (24.2 default vs 24.4 with `--ent_coef 0.0`), and the
+  BR seed-to-seed spread on the runner (about +-5) was larger than the difference. Treat the default as fine, but check the
+  curves when comparing runs.
 - **Compare only like with like**: same env settings, `--episodes`, and BR budget.
 - **Cost** is about `br_steps / steps-per-second`. At roughly 2400 steps/s, one 1M-step BR takes about 7 minutes, so
   `--br_seeds 2` over both roles takes about 30 minutes.
