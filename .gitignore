@@ -1,0 +1,52 @@
+# --- Training outputs (train.py writes <out_dir>/<timestamp-uuid>/) ---
+runs/
+outputs/
+logs/
+wandb/
+lightning_logs/
+tensorboard/
+events.out.tfevents.*
+
+# Model checkpoints / large artifacts
+*.pt
+*.pth
+*.ckpt
+*.npz
+*.npy
+*.pkl
+
+# Generated visualizations (from visualize.py)
+*.gif
+*.mp4
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# --- Environments ---
+.venv/
+venv/
+env/
+.env
+.envrc
+
+# --- Notebooks ---
+.ipynb_checkpoints/
+
+# --- Editors / OS ---
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db

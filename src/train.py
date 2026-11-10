@@ -17,7 +17,7 @@ from envs.tag import TagVecEnv, ADV, GOOD
 from algos.networks import GaussianActorCritic
 from algos.ppo import PPO, compute_gae
 from algos.rollout import collect_rollout
-from opponents import make_opponent
+from opponents import make_opponent, load_policy
 from utils.evaluate import evaluate
 from utils.plotting import plot_log
 
@@ -32,9 +32,12 @@ def train(args):
     # learner="both": self-play (one network, both roles). learner="adv"/"good": that role learns vs a FIXED opponent.
     roles = [ADV, GOOD] if args.learner == "both" else [ADV if args.learner == "adv" else GOOD]
     opp_role = None if args.learner == "both" else (GOOD if roles[0] == ADV else ADV)
-    opponent = None if opp_role is None else make_opponent(args.opponent, opp_role, A, args.seed + 7)
+    opponent = None if opp_role is None else make_opponent(args.opponent, opp_role, A, args.seed + 7,
+                                                           ckpt=args.opponent_ckpt, deterministic=args.opponent_deterministic)
 
     policy = GaussianActorCritic(D, A, env.act_low, env.act_high, tuple(args.hidden), args.init_log_std).to(device)
+    if args.init_ckpt:                       # warm start (e.g. best response initialised from the policy it responds to)
+        policy.load_state_dict(load_policy(args.init_ckpt).state_dict())
     ppo = PPO(policy, args)
 
     num_iters = args.total_steps // (T * N)
@@ -149,7 +152,14 @@ def get_args(argv=None):
     p.add_argument("--init_log_std", type=float, default=-0.5)
     p.add_argument("--learner", choices=["both", "adv", "good"], default="both",
                    help="both = self-play (default). adv/good = only that role learns vs a fixed --opponent")
-    p.add_argument("--opponent", choices=["random", "scripted"], default="random")
+    p.add_argument("--opponent", choices=["random", "scripted", "ckpt"], default="random",
+                   help="fixed opponent for --learner adv/good; ckpt = frozen checkpoint given by --opponent_ckpt")
+    p.add_argument("--opponent_ckpt", type=str, default=None,
+                   help="a .pt file or run dir (final.pt). The frozen network plays the non-learning role.")
+    p.add_argument("--init_ckpt", type=str, default=None,
+                   help="initialise the learner from this checkpoint (.pt or run dir); architecture must match --hidden")
+    p.add_argument("--opponent_deterministic", action="store_true",
+                   help="frozen opponent plays its mean action (default: samples, i.e. the policy as trained)")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--device", type=str, default="cpu")
     p.add_argument("--threads", type=int, default=4)
@@ -158,6 +168,8 @@ def get_args(argv=None):
     p.add_argument("--eval_episodes", type=int, default=50)
     p.add_argument("--out_dir", type=str, default="runs/selfplay_ppo")
     a = p.parse_args(argv)
+    if a.opponent == "ckpt" and a.learner != "both" and not a.opponent_ckpt:
+        p.error("--opponent ckpt requires --opponent_ckpt")
     a.out_dir = create_run_dir(a.out_dir)
     return a
 
