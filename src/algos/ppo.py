@@ -1,5 +1,5 @@
 # algos/ppo.py
-"""PPO: GAE, optional policy clipping / adaptive KL penalty, and minibatch updates."""
+"""PPO: GAE, optional policy clipping / adaptive distance penalty, and minibatch updates."""
 import numpy as np
 import torch
 import torch.nn as nn
@@ -32,19 +32,30 @@ def gaussian_kl(old_mean, old_std, new_dist):
     return torch.distributions.kl_divergence(old_dist, new_dist).sum(-1)
 
 
-def adapt_kl_coef(coef, kl, target):
+def gaussian_wasserstein2(old_mean, old_std, new_dist):
+    """Exact W2 per observation for unclipped diagonal Gaussians (not squared).
+
+    The vector norm has a zero subgradient at equality. Only the new policy
+    receives gradients; rollout parameters stay frozen.
+    """
+    delta = torch.cat((new_dist.mean - old_mean.detach(),
+                       new_dist.stddev - old_std.detach()), dim=-1)
+    return torch.linalg.vector_norm(delta, dim=-1)
+
+
+def adapt_penalty_coef(coef, distance, target):
     """Schulman et al. (2017), section 4: coefficient for the next rollout update."""
-    if kl < target / 1.5:
+    if distance < target / 1.5:
         return coef / 2.0
-    if kl > target * 1.5:
+    if distance > target * 1.5:
         return coef * 2.0
     return coef
 
 
 def ppo_loss(new_logp, old_logp, adv, new_v, old_v, ret, entropy,
              clip_coef, vf_coef, ent_coef, clip_vloss=True, *,
-             clip_policy=True, kl=None, kl_coef=0.0):
-    """Optional per-sample analytical KL adds a differentiable penalty to the loss."""
+             clip_policy=True, distance=None, penalty_coef=0.0):
+    """Optional per-sample analytical distance adds a differentiable penalty to the loss."""
     ratio = (new_logp - old_logp).exp()
     if clip_policy:
         pg_loss = torch.max(-adv * ratio, -adv * torch.clamp(ratio, 1 - clip_coef, 1 + clip_coef)).mean()
@@ -56,14 +67,14 @@ def ppo_loss(new_logp, old_logp, adv, new_v, old_v, ret, entropy,
     else:
         v_loss = 0.5 * ((new_v - ret) ** 2).mean()
     ent = entropy.mean()
-    kl_penalty = kl_coef * kl.mean() if kl is not None else new_logp.new_zeros(())
-    total = pg_loss + vf_coef * v_loss - ent_coef * ent + kl_penalty
+    penalty_loss = penalty_coef * distance.mean() if distance is not None else new_logp.new_zeros(())
+    total = pg_loss + vf_coef * v_loss - ent_coef * ent + penalty_loss
     with torch.no_grad():
         approx_kl = ((ratio - 1) - (ratio.log())).mean()      # k3 estimator of KL(old||new)
         clipfrac = ((ratio - 1.0).abs() > clip_coef).float().mean()
     return total, dict(loss=total.item(), policy_loss=pg_loss.item(), value_loss=v_loss.item(),
                        entropy=ent.item(), kl=approx_kl.item(), clipfrac=clipfrac.item(),
-                       kl_penalty=kl_penalty.item())
+                       penalty_loss=penalty_loss.item())
 
 
 class PPO:
@@ -72,7 +83,7 @@ class PPO:
     def __init__(self, policy, args):
         self.policy, self.args = policy, args
         self.opt = torch.optim.Adam(policy.parameters(), lr=args.lr, eps=1e-5)
-        self.beta = args.kl_coef_init
+        self.beta = args.penalty_coef_init
 
     def set_lr(self, lr):
         for g in self.opt.param_groups:
@@ -81,7 +92,7 @@ class PPO:
     def update(self, batch):
         """Update on a fresh on-policy batch of obs, act, logp, val, adv, ret tensors.
 
-        Optimization stats are minibatch means; kl_exact_final is measured under
+        Optimization stats are minibatch means; penalty_distance_final is measured under
         the final policy over the entire batch, and controls next update's beta.
         """
         a = self.args
@@ -93,7 +104,8 @@ class PPO:
             old_dist = self.policy.dist(batch["obs"])
             old_mean = old_dist.mean.detach().clone()
             old_std = old_dist.stddev.detach().clone()
-        coef_used = self.beta if a.adaptive_kl else 0.0
+        distance_fn = gaussian_wasserstein2 if a.penalty == "wasserstein-2" else gaussian_kl
+        coef_used = self.beta if a.penalty != "none" else 0.0
         stats = []
         for _ in range(a.update_epochs):
             perm = torch.randperm(n, device=batch["obs"].device)
@@ -106,10 +118,10 @@ class PPO:
                 new_logp = new_dist.log_prob(batch["act"][idx]).sum(-1)
                 ent = new_dist.entropy().sum(-1)
                 new_v = self.policy.value(batch["obs"][idx])
-                kl = gaussian_kl(old_mean[idx], old_std[idx], new_dist) if a.adaptive_kl else None
+                distance = distance_fn(old_mean[idx], old_std[idx], new_dist) if a.penalty != "none" else None
                 loss, st = ppo_loss(new_logp, batch["logp"][idx], adv, new_v, batch["val"][idx], batch["ret"][idx],
                                     ent, a.clip_coef, a.vf_coef, a.ent_coef, a.clip_vloss,
-                                    clip_policy=a.clip_policy, kl=kl, kl_coef=coef_used)
+                                    clip_policy=a.clip_policy, distance=distance, penalty_coef=coef_used)
                 self.opt.zero_grad(); loss.backward()
                 nn.utils.clip_grad_norm_(self.policy.parameters(), a.max_grad_norm)
                 self.opt.step()
@@ -118,11 +130,14 @@ class PPO:
                 break
         out = {k: float(np.mean([s_[k] for s_ in stats])) for k in stats[0]}
         with torch.no_grad():
-            final_kl = gaussian_kl(old_mean, old_std, self.policy.dist(batch["obs"])).mean().item()
-        if a.adaptive_kl:
-            self.beta = adapt_kl_coef(self.beta, final_kl, a.kl_target)
-        out.update(kl_exact_final=final_kl, kl_coef_used=coef_used,
-                   kl_coef_next=self.beta if a.adaptive_kl else 0.0)
+            final_dist = self.policy.dist(batch["obs"])
+            final_kl = gaussian_kl(old_mean, old_std, final_dist).mean().item()
+            final_distance = (distance_fn(old_mean, old_std, final_dist).mean().item()
+                              if a.penalty != "none" else 0.0)
+        if a.penalty != "none":
+            self.beta = adapt_penalty_coef(self.beta, final_distance, a.penalty_target)
+        out.update(penalty_distance_final=final_distance, kl_exact_final=final_kl, penalty_coef_used=coef_used,
+                   penalty_coef_next=self.beta if a.penalty != "none" else 0.0)
         var_y = batch["ret"].var()
         out["explained_var"] = float(1 - (batch["ret"] - batch["val"]).var() / (var_y + 1e-8)) if var_y > 0 else float("nan")
         return out

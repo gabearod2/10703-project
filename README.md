@@ -51,31 +51,37 @@ Every PPO hyperparameter is a flag; `python train.py -h` lists them all.
 Each run saves `config.json`, `training_log.json`, `training_curves.png`, `latest.pt` and `final.pt`
 to `<out_dir>/<timestamp>-<uuid>/`
 
-## Policy clipping and adaptive KL
+## Policy clipping and adaptive penalties
 
-Policy clipping and the adaptive KL penalty have independent switches:
+Policy clipping and the adaptive distance penalty have independent switches:
 
 ```bash
-python train.py --clip_policy true  --adaptive_kl false  # clipping only (default)
-python train.py --clip_policy false --adaptive_kl true   # KL penalty only
-python train.py --clip_policy true  --adaptive_kl true   # clipping + KL penalty
-python train.py --clip_policy false --adaptive_kl false  # unclipped surrogate, no KL penalty
+python train.py --clip_policy true  --penalty none  # clipping only (default)
+python train.py --clip_policy false --penalty kl   # KL penalty only
+python train.py --clip_policy true  --penalty kl   # clipping + KL penalty
+python train.py --clip_policy false --penalty none  # unclipped surrogate, no KL penalty
+python train.py --penalty wasserstein-2                 # clipping + Wasserstein-2
+python train.py --clip_policy false --penalty wasserstein-2 # Wasserstein-2 only
 ```
 
-`--clip_coef` (default `0.1`) is the shared policy and value clipping threshold.
+`--clip_coef` (default `0.1`)
 `--clip_policy false` disables only policy clipping; `--clip_vloss` independently controls value clipping.
 Entropy regularization (`--ent_coef`) still applies in every mode.
 
-With `--adaptive_kl true`, the minimized loss adds `beta * mean(KL(old || new))`.
-`--kl_coef_init` (default `1.0`) initializes beta; `--kl_target` (default `0.01`) sets its adaptation target.
+With `--penalty kl`, the minimized loss adds `beta * mean(KL(old || new))`.
+`--penalty_coef_init` (default `1.0`) initializes beta; `--penalty_target` (default `0.01`) sets its adaptation target.
+
+With `--penalty wasserstein-2`, the loss instead adds `beta * mean(W2)` where
+`W2 = sqrt(sum((new_mean - old_mean)^2 + (new_std - old_std)^2))` across action dimensions.
 
 `--target_kl` is the existing, separate **approximate-KL early-stopping threshold**, disabled by default.
 
 `training_log.json` metrics:
 
 - `kl_exact_final`: full-batch analytical KL after the last optimizer step, logged in every mode.
-- `kl_coef_used` / `kl_coef_next`: beta used for this update and for the next (both zero when disabled).
-- `kl_penalty`: mean weighted penalty across optimization minibatches (zero when disabled).
+- `penalty_coef_used` / `penalty_coef_next`: beta used for this update and for the next (both zero when disabled).
+- `penalty_distance_final`: selected full-batch distance after optimization (zero when disabled).
+- `penalty_loss`: mean weighted penalty across optimization minibatches (zero when disabled).
 
 `kl` remains the approximate KL averaged during optimization. `clipfrac` remains the fraction of
 sampled ratios outside the clipping interval, even when policy clipping is disabled.
