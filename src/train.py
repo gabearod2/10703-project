@@ -27,7 +27,8 @@ def train(args):
     torch.set_num_threads(args.threads)
     np.random.seed(args.seed); torch.manual_seed(args.seed)
 
-    env = TagVecEnv(args.num_envs, args.max_cycles, seed=args.seed, symmetric=args.symmetric)
+    env = TagVecEnv(args.num_envs, args.max_cycles, seed=args.seed, symmetric=args.symmetric,
+                    zero_sum=args.zero_sum, share_vel=args.share_vel)
     N, T, A, D = args.num_envs, args.num_steps, env.act_dim, env.obs_dim
     # learner="both": self-play (one network, both roles). learner="adv"/"good": that role learns vs a FIXED opponent.
     roles = [ADV, GOOD] if args.learner == "both" else [ADV if args.learner == "adv" else GOOD]
@@ -83,7 +84,8 @@ def train(args):
                       f"beta {m['penalty_coef_used']:g} -> {m['penalty_coef_next']:g} | penalty {m['penalty_loss']:.5f}")
 
         if args.eval_every > 0 and (it % args.eval_every == 0 or it == num_iters):
-            ev = evaluate(policy, args.eval_episodes, args.max_cycles, device=device, symmetric=args.symmetric)
+            ev = evaluate(policy, args.eval_episodes, args.max_cycles, device=device, symmetric=args.symmetric,
+                          zero_sum=args.zero_sum, share_vel=args.share_vel)
             ev["env_steps"] = env_steps
             log["eval"].append(ev)
             print("   eval:", {k: round(v, 1) for k, v in ev.items() if k != "env_steps"})
@@ -126,6 +128,10 @@ def get_args(argv=None):
     p.add_argument("--max_cycles", type=int, default=25, help="episode length")
     p.add_argument("--asymmetric", dest="symmetric", action="store_false",
                    help="use original MPE2 roles (faster/smaller runner); default = identical dynamics for both")
+    p.add_argument("--no_zero_sum", dest="zero_sum", action="store_false",
+                   help="original rewards. Default: chaser reward = -(runner reward), so the game is exactly zero-sum")
+    p.add_argument("--no_share_vel", dest="share_vel", action="store_false",
+                   help="original observations. Default: the runner also observes the chaser's velocity")
     p.add_argument("--lr", type=float, default=2.5e-4)
     p.add_argument("--anneal_lr", type=lambda s: s.lower() != "false", default=True)
     p.add_argument("--gamma", type=float, default=0.99)

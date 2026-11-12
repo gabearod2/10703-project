@@ -15,6 +15,15 @@ by how exploitable it is (best responses, cross-play), not only by its training 
 **Roles.** The *chaser* is `adv` in flags and logs (MPE2 `adversary_0`: +10 per contact). The *runner* is `good`
 (MPE2 `agent_0`: -10 per contact plus an out-of-bounds penalty). One network plays both roles; the role is a one-hot in the observation.
 
+**Game variant (defaults).** The contact reward is zero-sum by itself; the runner's out-of-bounds penalty and the runner not seeing
+the chaser's velocity were the asymmetries. By default both are removed:
+- zero-sum: chaser reward = -(runner reward), so `u_adv + u_good = 0` at every step. The runner's own reward is unchanged; the chaser
+  also gains when the runner leaves the arena. NashConv is then the standard zero-sum exploitability. Opt out with `--no_zero_sum`.
+- shared velocity: the runner also observes the chaser's velocity (in padded slots, so `obs_dim` stays 14). Opt out with `--no_share_vel`.
+
+`exploit.py` / `visualize.py` read these from the run's `config.json`, so best responses are trained in the same game. Runs made
+before these flags existed have no entry and are treated as the original game. Numbers from different variants are not comparable.
+
 ## Setup
 ```bash
 cd src
@@ -43,7 +52,7 @@ python visualize.py --run_dir <dir> --episodes 6 --stochastic
 ```
 
 Useful flags for `train.py`: `--ent_coef`, `--lr`, `--total_steps`, `--seed`, `--threads`, `--device cuda`,
-`--asymmetric` (original MPE2 roles; default is identical dynamics for both players), `--out_dir`.
+`--asymmetric` (original MPE2 roles; default is identical dynamics for both players), `--no_zero_sum`, `--no_share_vel`, `--out_dir`.
 Frozen-opponent flags: `--opponent ckpt --opponent_ckpt <.pt or run dir>`, `--opponent_deterministic` (opponent plays its mean
 action; default samples), `--init_ckpt <.pt or run dir>` (start the learner from a checkpoint).
 Every PPO hyperparameter is a flag; `python train.py -h` lists them all.

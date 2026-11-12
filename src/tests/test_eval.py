@@ -6,6 +6,8 @@
 4. --opponent ckpt trains end to end and never touches the frozen network.
 5. nashconv smoke run: output structure, gaps >= 0, NashConv = sum of the two gaps.
 6. crossplay: matrix shape, and identical deterministic checkpoints give identical entries.
+7. zero_sum (default) makes u_adv + u_good == 0 at every step (incl. out-of-bounds); share_vel (default) gives the runner the chaser's
+   velocity; with --no_zero_sum/--no_share_vel the original env is recovered; the settings flow through train, evaluate, nashconv and crossplay.
 """
 import os, sys, tempfile
 SRC = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -125,7 +127,69 @@ def test_crossplay():
     print("PASS crossplay (shape; identical checkpoints are interchangeable)")
 
 
+def _roll(env, steps, big=True):
+    obs, rews = env.reset(), []
+    rng = np.random.RandomState(0)
+    for _ in range(steps):
+        a = rng.uniform(0, 1, (env.num_envs, 2, env.act_dim)).astype(np.float32)
+        if big:
+            a[:, GOOD, 1], a[:, GOOD, 2] = 0.0, 1.0                  # runner pushes right every step -> leaves the arena
+        res = env.step(a)
+        rews.append(res["reward"].copy()); obs = res["obs"]
+    return np.array(rews), obs
+
+
+def test_zero_sum_and_share_vel():
+    base, _ = _roll(TagVecEnv(3, seed=1, zero_sum=False), 60)
+    assert (base[:, :, GOOD] < -1).any() and not np.allclose(base[:, :, ADV], -base[:, :, GOOD])   # default: boundary tax breaks it
+    zs, _ = _roll(TagVecEnv(3, seed=1), 60)                              # zero_sum is the default
+    assert np.allclose(zs[:, :, ADV], -zs[:, :, GOOD])                                              # exactly zero-sum
+    assert np.allclose(zs[:, :, GOOD], base[:, :, GOOD])                                            # runner's reward unchanged
+    env = TagVecEnv(2, seed=1)                                          # share_vel is the default
+    obs = env.reset()
+    for _ in range(5):
+        res = env.step(np.random.uniform(0, 1, (2, 2, env.act_dim)).astype(np.float32)); obs = res["obs"]
+    for i in range(2):
+        v = TagVecEnv.world(env.envs[i]).agents[ADV].state.p_vel
+        assert np.allclose(obs[i, GOOD, 10:12], v) and np.abs(v).sum() > 0
+        assert np.allclose(obs[i, ADV, 10:12], TagVecEnv.world(env.envs[i]).agents[GOOD].state.p_vel)   # chaser's own view unchanged
+    off = TagVecEnv(2, seed=1, share_vel=False).reset()
+    assert np.all(off[:, GOOD, 10:12] == 0) and off.shape == obs.shape                              # off: zero padding, same obs_dim
+    print("PASS zero_sum (sum == 0 incl. out-of-bounds, runner reward unchanged) and share_vel (runner sees chaser velocity)")
+
+
+def test_env_flags_flow_through():
+    d = tempfile.mkdtemp()
+    assert T.get_args([]).zero_sum and T.get_args([]).share_vel                                     # defaults on
+    off = T.get_args(["--no_zero_sum", "--no_share_vel"]); assert not off.zero_sum and not off.share_vel
+    args = T.get_args(["--total_steps", "256", "--num_envs", "4", "--num_steps", "32",
+                       "--hidden", *map(str, HID), "--eval_every", "1", "--eval_episodes", "4", "--out_dir", d])
+    pol, log = T.train(args)
+    assert np.isfinite(log["loss"]).all()
+    e = log["eval"][-1]
+    assert abs(e["self_adv"] + e["self_good"]) < 1e-4                                                # evaluate() is zero-sum too
+    path = os.path.join(d, "ckpt.pt"); torch.save(pol.state_dict(), path)
+    cfg_dir = os.path.join(d, "run"); os.makedirs(cfg_dir)
+    torch.save(pol.state_dict(), os.path.join(cfg_dir, "final.pt"))
+    import json
+    json.dump(vars(args), open(os.path.join(cfg_dir, "config.json"), "w"))
+    r = exploit.nashconv(cfg_dir, br_steps=128, br_seeds=1, episodes=4, out_dir=os.path.join(d, "x"),
+                         br_args="--num_envs 2 --num_steps 32")
+    assert r["zero_sum"] and r["share_vel"]
+    old = {k: v for k, v in vars(args).items() if k not in ("zero_sum", "share_vel")}                # run from before the flags existed
+    assert exploit.env_options(old) == {"zero_sum": False, "share_vel": False}
+    fz = PolicyOpponent(load_policy(cfg_dir), False)
+    m = play_match(fz, fz, 6, 25, 5, True)
+    assert abs(m["adv"] + m["good"]) < 1e-4                                                          # one match: returns sum to 0
+    for role in ("adv", "good"):
+        cfg = json.load(open(os.path.join(r[role]["selected"]["run_dir"], "config.json")))
+        assert cfg["zero_sum"] and cfg["share_vel"]                                                  # BR trained in the same game
+    exploit.crossplay([cfg_dir, cfg_dir], episodes=4, out=os.path.join(d, "cp"))
+    print("PASS zero_sum/share_vel reach train, evaluate, nashconv (BR runs too) and crossplay")
+
+
 if __name__ == "__main__":
     test_load_and_make_opponent(); test_play_match_matches_evaluate(); test_opponent_gets_its_own_role_obs()
     test_train_vs_frozen_ckpt(); test_nashconv_smoke(); test_crossplay()
+    test_zero_sum_and_share_vel(); test_env_flags_flow_through()
     print("\nALL OK")
