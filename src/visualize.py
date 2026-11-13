@@ -68,7 +68,8 @@ def main():
     a = p.parse_args()
 
     cfg = json.load(open(os.path.join(a.run_dir, "config.json")))
-    venv = TagVecEnv(1, cfg["max_cycles"], seed=a.seed, symmetric=cfg.get("symmetric", True))
+    venv = TagVecEnv(1, cfg["max_cycles"], seed=a.seed, symmetric=cfg.get("symmetric", True),
+                      zero_sum=cfg.get("zero_sum", False), share_vel=cfg.get("share_vel", False))
     policy = GaussianActorCritic(venv.obs_dim, venv.act_dim, venv.act_low, venv.act_high, tuple(cfg["hidden"]))
     policy.load_state_dict(torch.load(os.path.join(a.run_dir, a.ckpt), map_location="cpu"))
     policy.eval()
