@@ -64,9 +64,18 @@ class PolicyOpponent:
         for p in self.policy.parameters():
             p.requires_grad_(False)
 
+    def reset_rng(self, seed):
+        self.rng = np.random.default_rng(seed)
+
     @torch.no_grad()
     def __call__(self, obs):
-        a, _, _ = self.policy.act(torch.as_tensor(obs, dtype=torch.float32, device=self.device), self.deterministic)
+        dist = self.policy.dist(torch.as_tensor(obs, dtype=torch.float32, device=self.device))
+        a = dist.mean
+        if not self.deterministic:
+            if not hasattr(self, "rng"):
+                self.reset_rng(0)
+            noise = torch.as_tensor(self.rng.standard_normal(tuple(a.shape)), dtype=a.dtype, device=a.device)
+            a = a + dist.stddev * noise
         return self.policy.to_env(a).cpu().numpy()
 
 
@@ -76,8 +85,8 @@ class PoolOpponent:
     members, i.e. the average policy of fictitious play, without having to distil it into one network.
 
     Training (fictitious self-play): `add(policy)` appends a frozen copy; collect_rollout calls `episode_end(done)`.
-    Evaluation: `PoolOpponent.from_dir(<run>/pool)`; play_match calls `reseed(seed)` so that a match is reproducible
-    and the two seats of a mixture-vs-mixture match draw their members independently.
+    Evaluation: `PoolOpponent.from_dir(<run>/pool)`; play_match gives each seat a copy and calls `reset_rng(seed)`, so a
+    match is reproducible and the two seats of a mixture-vs-mixture match draw their members independently.
     """
     def __init__(self, seed=0, deterministic=False, device="cpu"):
         self.members, self.deterministic, self.device = [], deterministic, device
@@ -98,8 +107,11 @@ class PoolOpponent:
             p.requires_grad_(False)
         self.members.append(m)
 
-    def reseed(self, seed):
+    def reset_rng(self, seed):
+        """New member draw and action noise from `seed` (same protocol as PolicyOpponent.reset_rng)."""
         self.rng, self.assign = np.random.default_rng(seed), None
+
+    reseed = reset_rng
 
     def episode_end(self, done):
         """Envs flagged in `done` start a new episode: draw a new member for each of them."""
@@ -115,7 +127,11 @@ class PoolOpponent:
         out = np.zeros((n, self.members[0].low.numel()), dtype=np.float32)
         for k in np.unique(self.assign):                      # one batched forward pass per member in use
             idx = np.flatnonzero(self.assign == k)
-            a, _, _ = self.members[k].act(x[idx], self.deterministic)
+            dist = self.members[k].dist(x[idx])
+            a = dist.mean
+            if not self.deterministic:                        # own generator, like PolicyOpponent: reproducible matches
+                noise = torch.as_tensor(self.rng.standard_normal(tuple(a.shape)), dtype=a.dtype, device=a.device)
+                a = a + dist.stddev * noise
             out[idx] = self.members[k].to_env(a).cpu().numpy()
         return out
 
