@@ -44,11 +44,15 @@ def play_match(adv_ctrl, good_ctrl, num_episodes=100, max_cycles=25, seed=12345,
 
     Controllers are callables: encoded obs [N, D] -> env actions [N, A] (PolicyOpponent, scripted, random...).
     Env seeds are fixed by `seed`, so different matchups see the same initial states (common random numbers).
+    A PoolOpponent (mixture) is reseeded from `seed` and its seat; use two separate objects for mixture vs mixture.
     `env_kw`: extra TagVecEnv options (zero_sum, share_vel), which must match how the controllers were trained.
     Returns {"adv", "good", "adv_se", "good_se"}: mean and standard error over episodes of the episode return.
     """
     n = num_episodes
     env = TagVecEnv(num_envs=n, max_cycles=max_cycles, seed=seed, symmetric=symmetric, **env_kw)
+    for k, ctrl in enumerate((adv_ctrl, good_ctrl)):          # mixtures: fixed, seat-specific member draw per episode
+        if hasattr(ctrl, "reseed"):
+            ctrl.reseed(1000 * seed + k)
     obs, total = env.reset(), np.zeros((n, 2))
     for _ in range(max_cycles):
         a_env = np.zeros((n, 2, env.act_dim), dtype=np.float32)
