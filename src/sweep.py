@@ -137,7 +137,12 @@ def run(cfg, root, compare=True):
         fig.tight_layout(); fig.savefig(root / 'role_gaps.png'); plt.close(fig)
     if compare and checkpoints:
         c = cfg['comparisons']
-        exploit.crossplay(checkpoints, episodes=c['episodes'], seed=c['seed'], out=str(root / 'crossplay'), device=settings['device'])
+        successful = [r for r in rows if r['status'] == 'complete']
+        exploit.crossplay(checkpoints, episodes=c['episodes'], seed=c['seed'], out=str(root / 'crossplay'),
+                          device=settings['device'],
+                          labels=[f"Config {r['configuration']} | seed {r['seed']}" for r in successful],
+                          configuration_ids=[r['configuration'] for r in successful],
+                          seeds=[r['seed'] for r in successful], expected_seeds=cfg['seeds'])
         fixed, episode_records = [], []
         for row in rows:
             if row['status'] != 'complete': continue

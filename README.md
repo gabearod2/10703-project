@@ -204,3 +204,24 @@ Evaluation now rejects non-finite results and protected BR argument overrides.
 `play_match(..., return_episodes=True)` additionally returns per-episode rewards;
 its stochastic controllers use independent role seeds. NashConv reports raw and
 clipped gaps plus paired `gap_se`, using one shared self-play baseline.
+
+Head-to-head checkpoint plots (`crossplay.png`, `crossplay_runner.png`) label each
+axis entry as `Config 0 | seed 0`. Rows are chasers; columns are runners in both
+plots. The configuration plots (`crossplay_configs.png`,
+`crossplay_configs_runner.png`) average all seed pairs: with three seeds each,
+each cell averages nine matchups, including diagonal cells. Incomplete
+configurations are omitted with a message. `crossplay_configs.json` records the
+configuration order, mean returns, and seed-pair counts.
+
+To regenerate both plot sets from saved results without training or evaluation,
+run from `src/`:
+
+```bash
+python exploit.py replot --input runs/preliminary/crossplay.json
+```
+
+For older sweep results, keep `finalists.json` and `sweep_config.json` beside
+`crossplay.json` so configuration IDs and seeds can be recovered. Checkpoints
+are not needed. The command enriches `crossplay.json` with labels and grouping
+metadata; its recorded returns remain unchanged. Use `--out /path/to/crossplay`
+to write results with a different prefix.
