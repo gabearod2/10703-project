@@ -115,7 +115,7 @@ Goal: judge a trained self-play policy by **how hard it is to exploit**. Code: `
 | `policy_value` | `exploit/exploitability.json` | `u_role(pi)` on the report episodes | Baseline the BR must beat |
 | `br_value` | same | Return of the best trained BR for that role vs the frozen checkpoint | Higher than `policy_value` means that role can be exploited |
 | `gap` / `gap_raw` | same | `gap = max(0, br_value - policy_value)`; `gap_raw` is unclamped | Per-role exploitability |
-| **`nashconv`** | same | `gap_adv + gap_good` | About 0: no detectable exploit. Larger: easier to exploit. **A lower bound.** |
+| **`nashconv`** | same | `gap_adv + gap_good` | About 0: no detectable exploit. Larger: easier to exploit. **A finite-budget estimate.** |
 | `*_se` | same | Standard error over evaluation episodes | Gaps within about 2 s.e. are noise |
 | Cross-play matrix | `crossplay.json` / `.png` | `chaser_return[i][j]`, `runner_return[i][j]`: chaser from checkpoint i vs runner from checkpoint j | Relative strength and cycling; payoff table for PSRO / ELO later |
 
@@ -142,7 +142,7 @@ Results go to `<run dir>/exploit/exploitability.json`. Top level: `ckpt`, `br_st
 
 ### Reading the number
 
-- **It is a lower bound.** PPO may not find the true best response. Check the BR's `training_curves.png`
+- **It is an estimate.** PPO may not find the true best response. Check the BR's `training_curves.png`
   (`exploit/br_<role>_s<seed>/<run>/`): if its return is still rising, or seeds disagree (`candidates` in the JSON), raise
   `--br_steps` / `--br_seeds` before trusting the gap.
 - **BR hyperparameters can be changed** with `--br_args`, e.g. `--br_args "--ent_coef 0.0"`. With the default entropy bonus the
@@ -164,3 +164,64 @@ Plays every chaser against every runner. Row = chaser's checkpoint, column = run
 (high favours the chaser). The diagonal is each checkpoint against itself. Cycles (A's chaser beats B's runner, B's beats C's,
 C's beats A's) show up as a pattern off the diagonal. It needs two or more checkpoints; `train.py` currently saves only
 `latest.pt` and `final.pt`.
+
+
+## Preliminary entropy/clipping sweep
+
+Run from `src/` after installing `PyYAML` (`python -m pip install PyYAML`):
+
+```bash
+python sweep.py --config configs/ppo_preliminary.yaml --out_dir runs/preliminary
+```
+
+The YAML explicitly defines entropy `[0.01, 0.2]` × clipping `[0.1, 0.3]`, three
+shared candidate seeds, fixed PPO settings, fixed best-response settings, and
+budgets. The four settings use no KL/W2 penalty. The fixed PPO parameters match
+the paper repository's winning classical Phantom TTT configuration.
+
+The runner is sequential and resumes completed candidate and exploitability
+stages when given the same directory and unchanged config. Interrupted stages
+restart from scratch. Failed trials retain tracebacks and are retried on resume.
+Only configurations with all seeds completed are ranked, by mean learned
+NashConv (lower is better), with training-seed standard deviation. Exact ties
+use configuration index. Treat learned NashConv as an estimate, not a certified
+bound. Best responses are warm-started; deterministic/stochastic BR selection
+uses separate episodes from score reporting.
+
+Outputs include `configurations.json`, `trials.csv`, `rankings.csv`, `summary.json`,
+`finalists.json` with exact checkpoint paths, candidate/attacker logs and weights,
+per-episode exploitation records, and exploitability/role-gap plots. All four
+configurations are also compared against random/scripted opponents and via
+cross-play, with CSV/JSON results and plots. Use `--no_comparisons` to postpone
+comparisons; rerun without it to evaluate saved checkpoints.
+
+For future explicit grids, change `grid` and `fixed` or add `variants`, each with
+its own `fixed` and `grid` mapping (e.g. a penalty-specific `penalty_target` grid).
+Only the preliminary config is supplied. The runner does exhaustive enumeration;
+it does not perform adaptive Optuna sampling.
+
+Evaluation now rejects non-finite results and protected BR argument overrides.
+`play_match(..., return_episodes=True)` additionally returns per-episode rewards;
+its stochastic controllers use independent role seeds. NashConv reports raw and
+clipped gaps plus paired `gap_se`, using one shared self-play baseline.
+
+Head-to-head checkpoint plots (`crossplay.png`, `crossplay_runner.png`) label each
+axis entry as `Config 0 | seed 0`. Rows are chasers; columns are runners in both
+plots. The configuration plots (`crossplay_configs.png`,
+`crossplay_configs_runner.png`) average all seed pairs: with three seeds each,
+each cell averages nine matchups, including diagonal cells. Incomplete
+configurations are omitted with a message. `crossplay_configs.json` records the
+configuration order, mean returns, and seed-pair counts.
+
+To regenerate both plot sets from saved results without training or evaluation,
+run from `src/`:
+
+```bash
+python exploit.py replot --input runs/preliminary/crossplay.json
+```
+
+For older sweep results, keep `finalists.json` and `sweep_config.json` beside
+`crossplay.json` so configuration IDs and seeds can be recovered. Checkpoints
+are not needed. The command enriches `crossplay.json` with labels and grouping
+metadata; its recorded returns remain unchanged. Use `--out /path/to/crossplay`
+to write results with a different prefix.

@@ -29,6 +29,13 @@ def train(args):
 
     env = TagVecEnv(args.num_envs, args.max_cycles, seed=args.seed, symmetric=args.symmetric,
                     zero_sum=args.zero_sum, share_vel=args.share_vel)
+    try:
+        return _train(args, env, device)
+    finally:
+        env.close()
+
+
+def _train(args, env, device):
     N, T, A, D = args.num_envs, args.num_steps, env.act_dim, env.obs_dim
     # learner="both": self-play (one network, both roles). learner="adv"/"good": that role learns vs a FIXED opponent.
     roles = [ADV, GOOD] if args.learner == "both" else [ADV if args.learner == "adv" else GOOD]
@@ -95,7 +102,6 @@ def train(args):
     with open(os.path.join(args.out_dir, "training_log.json"), "w") as f:
         json.dump(log, f, indent=1)
     plot_log(log, os.path.join(args.out_dir, "training_curves.png"))
-    env.close()
     print("saved to", args.out_dir)
     return policy, log
 
@@ -120,7 +126,7 @@ def positive_float(value):
     return value
 
 
-def get_args(argv=None):
+def get_args(argv=None, create_dir=True):
     p = argparse.ArgumentParser("Self-play PPO (Gaussian) on 1v1 MPE2 Simple Tag")
     p.add_argument("--total_steps", type=int, default=2_000_000, help="env steps (per-env transitions, summed over envs)")
     p.add_argument("--num_envs", type=int, default=8)
@@ -176,7 +182,8 @@ def get_args(argv=None):
     a = p.parse_args(argv)
     if a.opponent == "ckpt" and a.learner != "both" and not a.opponent_ckpt:
         p.error("--opponent ckpt requires --opponent_ckpt")
-    a.out_dir = create_run_dir(a.out_dir)
+    if create_dir:
+        a.out_dir = create_run_dir(a.out_dir)
     return a
 
 

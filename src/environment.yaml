@@ -11,3 +11,4 @@ dependencies:
       - gymnasium
       - pettingzoo
       - mpe2
+      - PyYAML

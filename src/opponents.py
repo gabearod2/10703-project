@@ -64,9 +64,18 @@ class PolicyOpponent:
         for p in self.policy.parameters():
             p.requires_grad_(False)
 
+    def reset_rng(self, seed):
+        self.rng = np.random.default_rng(seed)
+
     @torch.no_grad()
     def __call__(self, obs):
-        a, _, _ = self.policy.act(torch.as_tensor(obs, dtype=torch.float32, device=self.device), self.deterministic)
+        dist = self.policy.dist(torch.as_tensor(obs, dtype=torch.float32, device=self.device))
+        a = dist.mean
+        if not self.deterministic:
+            if not hasattr(self, "rng"):
+                self.reset_rng(0)
+            noise = torch.as_tensor(self.rng.standard_normal(tuple(a.shape)), dtype=a.dtype, device=a.device)
+            a = a + dist.stddev * noise
         return self.policy.to_env(a).cpu().numpy()
 
 
