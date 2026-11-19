@@ -175,13 +175,23 @@ def run(cfg, root, compare=True, jobs=1):
         fig.tight_layout(); fig.savefig(root / 'role_gaps.png'); plt.close(fig)
     if compare and checkpoints:
         c = cfg['comparisons']
+        successful = [r for r in rows if r['status'] == 'complete']
         extra = list(cfg.get('crossplay_with', []))               # e.g. self-play checkpoints from another sweep
         for path in [e for e in extra if not Path(e).exists()]:
             print(f'crossplay_with: {path} not found, skipped', flush=True)
         extra = [e for e in extra if Path(e).exists()]
-        pools = [r['pool'] for r in rows if r.get('pool')]         # a pool directory plays as its average policy
-        exploit.crossplay(extra + checkpoints + pools, episodes=c['episodes'], seed=c['seed'],
-                          out=str(root / 'crossplay'), device=settings['device'])
+        pooled = [r for r in successful if r.get('pool')]          # a pool directory plays as its average policy
+        # Extras and pools get no configuration id, so they appear in the per-checkpoint plot but not the
+        # configuration-averaged one.
+        exploit.crossplay(extra + checkpoints + [r['pool'] for r in pooled], episodes=c['episodes'], seed=c['seed'],
+                          out=str(root / 'crossplay'), device=settings['device'],
+                          labels=[exploit.checkpoint_label(n, e) for n, e in enumerate(extra)]
+                                 + [f"Config {r['configuration']} | seed {r['seed']}" for r in successful]
+                                 + [f"Config {r['configuration']} | seed {r['seed']} (avg)" for r in pooled],
+                          configuration_ids=[None] * len(extra) + [r['configuration'] for r in successful]
+                                            + [None] * len(pooled),
+                          seeds=[None] * len(extra) + [r['seed'] for r in successful] + [None] * len(pooled),
+                          expected_seeds=cfg['seeds'])
         fixed, episode_records = [], []
         for row in rows:
             if row['status'] != 'complete': continue
