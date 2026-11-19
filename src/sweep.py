@@ -184,7 +184,7 @@ def run(cfg, root, compare=True, jobs=1):
         # Extras and pools get no configuration id, so they appear in the per-checkpoint plot but not the
         # configuration-averaged one.
         exploit.crossplay(extra + checkpoints + [r['pool'] for r in pooled], episodes=c['episodes'], seed=c['seed'],
-                          out=str(root / 'crossplay'), device=settings['device'],
+                          out=str(root / 'crossplay'), device=configurations[0]['device'],
                           labels=[exploit.checkpoint_label(n, e) for n, e in enumerate(extra)]
                                  + [f"Config {r['configuration']} | seed {r['seed']}" for r in successful]
                                  + [f"Config {r['configuration']} | seed {r['seed']} (avg)" for r in pooled],
@@ -195,7 +195,7 @@ def run(cfg, root, compare=True, jobs=1):
         fixed, episode_records = [], []
         for row in rows:
             if row['status'] != 'complete': continue
-            policy = load_policy(row['checkpoint'], settings['device'])
+            policy = load_policy(row['checkpoint'], configurations[row['configuration']]['device'])
             opts = configurations[row['configuration']]
             for role in (0, 1):
                 for name in ('random', 'scripted'):

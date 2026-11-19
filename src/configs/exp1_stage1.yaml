@@ -1,0 +1,53 @@
+# Experiment 1, stage 1: one-at-a-time sweep around the preliminary winner (ent 0.01, clip 0.1).
+# Each variant changes ONE parameter (fixed values below are the base config). Entropy is lowered rather than
+# squashing the policy, so the closed-form Gaussian KL/W2 penalties stay valid.
+# 13 configurations x 3 seeds = 39 trials. BR: 4 seeds per role, no entropy bonus (see README / variance check).
+#   python sweep.py --config configs/exp1_stage1.yaml --out_dir runs/exp1_stage1 --jobs 12
+grid: {}
+variants:
+  - {}                                     # base
+  - grid: {ent_coef: [0.0, 0.005]}
+  - grid: {clip_coef: [0.2, 0.3]}
+  - grid: {update_epochs: [1, 2]}
+  - grid: {lr: [0.00002, 0.002]}
+  - grid: {num_minibatches: [2, 8]}
+  - grid: {num_steps: [64, 256]}
+seeds: [0, 1, 2]
+fixed:
+  penalty: none
+  clip_policy: true
+  ent_coef: 0.01
+  clip_coef: 0.1
+  lr: 0.00025
+  anneal_lr: true
+  num_envs: 8
+  num_steps: 128
+  num_minibatches: 4
+  update_epochs: 4
+  gamma: 0.99
+  gae_lambda: 0.95
+  vf_coef: 0.5
+  max_grad_norm: 0.5
+  norm_adv: true
+  clip_vloss: true
+  target_kl: null
+  hidden: [512, 512, 512]
+  total_steps: 2000000
+  zero_sum: true
+  share_vel: true
+  symmetric: true
+  max_cycles: 25
+  threads: 1
+  device: cpu
+br:
+  steps: 1000000
+  seeds: 4
+  seed: 10000
+  episodes: 200
+  eval_seed: 100000
+  report_seed: 200000
+  init: warm
+  args: '--ent_coef 0 --clip_coef 0.1 --penalty none'
+comparisons:
+  episodes: 200
+  seed: 300000

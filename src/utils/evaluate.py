@@ -3,7 +3,8 @@
 import numpy as np
 import torch
 
-from envs.tag import TagVecEnv, ADV, GOOD
+from envs.tag import ADV, GOOD
+from envs.fast_tag import make_vec_env
 from opponents import make_opponent
 
 # (controller of the chaser, controller of the runner)
@@ -18,7 +19,7 @@ def evaluate(policy, num_episodes=50, max_cycles=25, seed=12345, device="cpu", s
     out = {}
     for name, controllers in SETTINGS.items():
         n = num_episodes
-        env = TagVecEnv(num_envs=n, max_cycles=max_cycles, seed=seed, symmetric=symmetric, **env_kw)
+        env = make_vec_env(n, max_cycles, seed=seed, symmetric=symmetric, **env_kw)
         try:
             opps = {role: make_opponent(c, role, env.act_dim, seed) for role, c in zip((ADV, GOOD), controllers) if c != "policy"}
             obs = env.reset()
@@ -49,7 +50,7 @@ def play_match(adv_ctrl, good_ctrl, num_episodes=100, max_cycles=25, seed=12345,
     Env seeds are fixed by `seed`, so different matchups see the same initial states (common random numbers). Each seat
     plays a copy of its controller with its own action seed, so results do not depend on the global RNG state and one
     object may sit in both seats (a PoolOpponent then draws its members independently per seat).
-    `env_kw`: extra TagVecEnv options (zero_sum, share_vel), which must match how the controllers were trained.
+    `env_kw`: extra env options (zero_sum, share_vel, backend), which must match how the controllers were trained.
     Returns {"adv", "good", "adv_se", "good_se"}: mean and standard error over episodes of the episode return;
     with `return_episodes`, also "returns" ([episode][role]) for paired deviation estimates.
     """
@@ -63,7 +64,7 @@ def play_match(adv_ctrl, good_ctrl, num_episodes=100, max_cycles=25, seed=12345,
             ctrl.reset_rng(action_seed)
         elif hasattr(ctrl, "rng"):
             ctrl.rng = np.random.default_rng(action_seed)
-    env = TagVecEnv(num_episodes, max_cycles, seed=seed, symmetric=symmetric, **env_kw)
+    env = make_vec_env(num_episodes, max_cycles, seed=seed, symmetric=symmetric, **env_kw)
     try:
         obs, total = env.reset(), np.zeros((num_episodes, 2))
         active = np.ones(num_episodes, dtype=bool)

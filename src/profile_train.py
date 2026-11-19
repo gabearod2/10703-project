@@ -13,7 +13,8 @@ import numpy as np
 import torch
 
 import train
-from envs.tag import TagVecEnv, ADV
+from envs.tag import ADV
+from envs.fast_tag import make_vec_env
 from algos.networks import GaussianActorCritic
 from algos.ppo import PPO, compute_gae
 from algos.rollout import collect_rollout, learner_obs
@@ -27,6 +28,7 @@ def main():
     p.add_argument('--num_steps', type=int, default=128)
     p.add_argument('--iters', type=int, default=8, help='timed iterations per setting (after 2 warm-up)')
     p.add_argument('--threads', type=int, default=1)
+    p.add_argument('--backend', choices=['fast', 'mpe'], default='fast')
     a = p.parse_args()
     dev = torch.device(a.device)
     torch.set_num_threads(a.threads)
@@ -37,7 +39,7 @@ def main():
         args = train.get_args(['--num_envs', str(n), '--num_steps', str(a.num_steps), '--device', a.device,
                                '--learner', 'adv', '--hidden', '512', '512', '512'], create_dir=False)
         torch.manual_seed(0); np.random.seed(0)
-        env = TagVecEnv(n, args.max_cycles, seed=0)
+        env = make_vec_env(n, args.max_cycles, seed=0, backend=a.backend)
         A, D = env.act_dim, env.obs_dim
         policy = GaussianActorCritic(D, A - 1, env.act_low, env.act_high, tuple(args.hidden), args.init_log_std).to(dev)
         opponent = PolicyOpponent(GaussianActorCritic(D, A - 1, env.act_low, env.act_high, tuple(args.hidden), args.init_log_std))

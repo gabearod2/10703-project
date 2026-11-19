@@ -14,7 +14,8 @@ from uuid import uuid4
 import numpy as np
 import torch
 
-from envs.tag import TagVecEnv, ADV, GOOD
+from envs.tag import ADV, GOOD
+from envs.fast_tag import make_vec_env
 from algos.networks import GaussianActorCritic
 from algos.ppo import PPO, compute_gae
 from algos.rollout import collect_rollout, learner_obs
@@ -28,8 +29,8 @@ def train(args):
     torch.set_num_threads(args.threads)
     np.random.seed(args.seed); torch.manual_seed(args.seed)
 
-    env = TagVecEnv(args.num_envs, args.max_cycles, seed=args.seed, symmetric=args.symmetric,
-                    zero_sum=args.zero_sum, share_vel=args.share_vel)
+    env = make_vec_env(args.num_envs, args.max_cycles, seed=args.seed, backend=getattr(args, "env_backend", "fast"),
+                       symmetric=args.symmetric, zero_sum=args.zero_sum, share_vel=args.share_vel)
     try:
         return _train(args, env, device)
     finally:
@@ -123,7 +124,7 @@ def _train(args, env, device):
 
         if args.eval_every > 0 and (it % args.eval_every == 0 or it == num_iters):
             ev = evaluate(policy, args.eval_episodes, args.max_cycles, device=device, symmetric=args.symmetric,
-                          zero_sum=args.zero_sum, share_vel=args.share_vel)
+                          zero_sum=args.zero_sum, share_vel=args.share_vel, backend=getattr(args, "env_backend", "fast"))
             ev["env_steps"] = env_steps
             log["eval"].append(ev)
             print("   eval:", {k: round(v, 1) for k, v in ev.items() if k != "env_steps"})
@@ -166,6 +167,8 @@ def get_args(argv=None, create_dir=True):
     p.add_argument("--num_envs", type=int, default=8)
     p.add_argument("--num_steps", type=int, default=128, help="rollout length per env")
     p.add_argument("--max_cycles", type=int, default=25, help="episode length")
+    p.add_argument("--env_backend", choices=["fast", "mpe"], default="fast",
+                   help="fast = batched NumPy Simple Tag (envs/fast_tag.py, same dynamics); mpe = the MPE2/PettingZoo reference")
     p.add_argument("--asymmetric", dest="symmetric", action="store_false",
                    help="use original MPE2 roles (faster/smaller runner); default = identical dynamics for both")
     p.add_argument("--no_zero_sum", dest="zero_sum", action="store_false",
