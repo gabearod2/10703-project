@@ -1,0 +1,44 @@
+grid:
+  ent_coef: [0.01, 0.2]
+  clip_coef: [0.1, 0.3]
+  update_epochs: [1, 2, 4]
+  lr: [0.00002, 0.00025, 0.002]
+  num_minibatches: [2, 4, 8]
+  num_steps: [64, 128, 256]
+
+seeds: [0, 1, 2]
+
+fixed:
+  penalty: none
+  clip_policy: true
+  anneal_lr: true
+  num_envs: 8
+  gamma: 0.99
+  gae_lambda: 0.95
+  vf_coef: 0.5
+  max_grad_norm: 0.5
+  norm_adv: true
+  clip_vloss: true
+  target_kl: null
+  hidden: [512, 512, 512]
+  total_steps: 2000000
+  zero_sum: true
+  share_vel: true
+  symmetric: true
+  max_cycles: 25
+  threads: 1
+  device: cuda
+
+br:
+  steps: 1000000
+  seeds: 1
+  seed: 10000
+  episodes: 200
+  eval_seed: 100000
+  report_seed: 200000
+  init: warm
+  args: "--ent_coef 0.05 --clip_coef 0.1 --penalty none"
+
+comparisons:
+  episodes: 200
+  seed: 300000
