@@ -86,21 +86,39 @@ def run(cfg, root, compare=True):
                     with (candidate / 'console.log').open('w') as log, contextlib.redirect_stdout(log):
                         train.train(Namespace(**args))
                     save(candidate / 'complete.json', {'finished': True})
+                b = cfg['br']
                 if metrics_path.exists():
                     metric = json.loads(metrics_path.read_text())
                 else:
-                    b = cfg['br']
                     with (directory / 'exploit.log').open('w') as log, contextlib.redirect_stdout(log):
                         metric = exploit.nashconv(str(candidate), br_steps=b['steps'], br_seeds=b['seeds'],
                             seed=b['seed'], episodes=b['episodes'], eval_seed=b['eval_seed'], report_seed=b['report_seed'],
                             out_dir=str(directory / 'exploit'), br_init=b['init'], br_args=b['args'],
                             device=args['device'], threads=args['threads'])
                     save(metrics_path, metric)
-                rows.append(dict(configuration=index, seed=seed, status='complete', nashconv=metric['nashconv'],
-                                 adv_gap=metric['adv']['gap'], good_gap=metric['good']['gap'],
-                                 checkpoint=str(candidate / 'final.pt')))
+                row = dict(configuration=index, seed=seed, status='complete', nashconv=metric['nashconv'],
+                           adv_gap=metric['adv']['gap'], good_gap=metric['good']['gap'],
+                           checkpoint=str(candidate / 'final.pt'))
+                note = ''
+                if settings.get('algo') == 'fsp':
+                    # Fictitious self-play: also score the AVERAGE policy (uniform mixture over candidate/pool),
+                    # which is the policy fictitious play's convergence guarantee is about.
+                    average_path = directory / 'metrics_avg.json'
+                    if average_path.exists():
+                        average = json.loads(average_path.read_text())
+                    else:
+                        with (directory / 'exploit_avg.log').open('w') as log, contextlib.redirect_stdout(log):
+                            average = exploit.nashconv(str(candidate), br_steps=b['steps'], br_seeds=b['seeds'],
+                                seed=b['seed'], episodes=b['episodes'], eval_seed=b['eval_seed'], report_seed=b['report_seed'],
+                                out_dir=str(directory / 'exploit_avg'), br_init=b['init'], br_args=b['args'],
+                                device=args['device'], threads=args['threads'], average=True)
+                        save(average_path, average)
+                    row.update(nashconv_avg=average['nashconv'], adv_gap_avg=average['adv']['gap'],
+                               good_gap_avg=average['good']['gap'], pool=str(candidate / 'pool'))
+                    note = f' | average policy NashConv={average["nashconv"]:.4f}'
+                rows.append(row)
                 checkpoints.append(str(candidate / 'final.pt'))
-                print(f'config {index}, seed {seed}: NashConv={metric["nashconv"]:.4f}', flush=True)
+                print(f'config {index}, seed {seed}: NashConv={metric["nashconv"]:.4f}{note}', flush=True)
             except Exception as error:
                 import traceback
                 save(directory / 'failure.json', dict(error=repr(error), traceback=traceback.format_exc()))
@@ -114,6 +132,10 @@ def run(cfg, root, compare=True):
             rankings.append(dict(configuration=i, mean_nashconv=float(np.mean(scores)),
                                  std_nashconv=float(np.std(scores, ddof=1)) if len(scores)>1 else 0.,
                                  n_seeds=len(scores)))
+            averages = [r['nashconv_avg'] for r in rows if r['configuration'] == i and 'nashconv_avg' in r]
+            if len(averages) == len(scores):                      # fsp configurations: average-policy score as well
+                rankings[-1].update(mean_nashconv_avg=float(np.mean(averages)),
+                                    std_nashconv_avg=float(np.std(averages, ddof=1)) if len(averages)>1 else 0.)
     rankings.sort(key=lambda r: (r['mean_nashconv'], r['configuration']))
     table(root / 'rankings.csv', rankings)
     save(root / 'configurations.json', configurations)
@@ -137,7 +159,13 @@ def run(cfg, root, compare=True):
         fig.tight_layout(); fig.savefig(root / 'role_gaps.png'); plt.close(fig)
     if compare and checkpoints:
         c = cfg['comparisons']
-        exploit.crossplay(checkpoints, episodes=c['episodes'], seed=c['seed'], out=str(root / 'crossplay'), device=settings['device'])
+        extra = list(cfg.get('crossplay_with', []))               # e.g. self-play checkpoints from another sweep
+        for path in [e for e in extra if not Path(e).exists()]:
+            print(f'crossplay_with: {path} not found, skipped', flush=True)
+        extra = [e for e in extra if Path(e).exists()]
+        pools = [r['pool'] for r in rows if r.get('pool')]         # a pool directory plays as its average policy
+        exploit.crossplay(extra + checkpoints + pools, episodes=c['episodes'], seed=c['seed'],
+                          out=str(root / 'crossplay'), device=settings['device'])
         fixed, episode_records = [], []
         for row in rows:
             if row['status'] != 'complete': continue

@@ -124,6 +124,10 @@ python exploit.py nashconv --ckpt runs/fsp_s0/<run> --average       # average po
 python exploit.py crossplay --ckpts runs/sp_s0/<run>/final.pt runs/fsp_s0/<run>/final.pt runs/fsp_s0/<run>/pool
 ```
 
+`sweep.py` handles fsp configs too: with `algo: fsp` in `fixed` it scores both the final iterate (`nashconv`) and the average
+policy (`nashconv_avg`), and an optional top-level `crossplay_with` list adds outside checkpoints (e.g. the self-play baseline)
+to the final cross-play. See `configs/fsp_comparison.yaml`.
+
 The average policy is played as a mixture (one member per episode), not distilled into one network. With `--average` the best response
 trains against that mixture and is warm-started from `final.pt`. `--snapshot_every N` also works with plain self-play: it only saves
 the snapshots (about 4 MB each), e.g. for cross-play over training time.

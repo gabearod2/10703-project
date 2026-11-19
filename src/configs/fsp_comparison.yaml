@@ -1,0 +1,53 @@
+# Fictitious self-play with the best preliminary self-play settings (config 0: ent_coef 0.01, clip_coef 0.1).
+# python sweep.py --config configs/fsp_comparison.yaml --out_dir runs/fsp_comparison
+#
+# 16 envs x 4M steps: in fsp only one agent per env learns, so this matches the self-play runs (8 envs x 2M steps)
+# in samples per update (2048) and number of updates (976). Each run is scored twice with the same best-response
+# settings as the preliminary sweep: the final iterate (nashconv) and the average policy (nashconv_avg).
+grid:
+  ent_coef: [0.01]
+seeds: [0, 1, 2]
+fixed:
+  algo: fsp
+  snapshot_every: 25          # 39 pool members per run, about 4 MB each
+  clip_coef: 0.1
+  penalty: none
+  clip_policy: true
+  lr: 0.00025
+  anneal_lr: true
+  num_envs: 16
+  num_steps: 128
+  num_minibatches: 4
+  update_epochs: 4
+  gamma: 0.99
+  gae_lambda: 0.95
+  vf_coef: 0.5
+  max_grad_norm: 0.5
+  norm_adv: true
+  clip_vloss: true
+  target_kl: null
+  hidden: [512, 512, 512]
+  total_steps: 4000000
+  zero_sum: true
+  share_vel: true
+  symmetric: true
+  max_cycles: 25
+  threads: 1
+  device: cuda
+br:
+  steps: 1000000
+  seeds: 1
+  seed: 10000
+  episodes: 200
+  eval_seed: 100000
+  report_seed: 200000
+  init: warm
+  args: '--ent_coef 0.05 --clip_coef 0.1 --penalty none'
+comparisons:
+  episodes: 200
+  seed: 300000
+# head-to-head against the self-play baseline (preliminary config 0); paths are relative to src/
+crossplay_with:
+  - runs/preliminary/config_000/seed_0/candidate/final.pt
+  - runs/preliminary/config_000/seed_1/candidate/final.pt
+  - runs/preliminary/config_000/seed_2/candidate/final.pt

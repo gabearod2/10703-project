@@ -25,7 +25,7 @@ fixed:
   symmetric: true
   max_cycles: 25
   threads: 1
-  device: cpu
+  device: cuda
 br:
   steps: 1000000
   seeds: 1
