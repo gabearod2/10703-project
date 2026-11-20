@@ -43,7 +43,16 @@ def evaluate(policy, num_episodes=50, max_cycles=25, seed=12345, device="cpu", s
 @torch.no_grad()
 def play_match(adv_ctrl, good_ctrl, num_episodes=100, max_cycles=25, seed=12345,
                symmetric=True, return_episodes=False, **env_kw):
-    """Seeded stochastic matchup. Optional records support paired deviation estimates."""
+    """Mean return when `adv_ctrl` plays the chaser and `good_ctrl` the runner (seeded stochastic matchup).
+
+    Controllers are callables: encoded obs [N, D] -> env actions [N, A] (PolicyOpponent, PoolOpponent, scripted, random...).
+    Env seeds are fixed by `seed`, so different matchups see the same initial states (common random numbers). Each seat
+    plays a copy of its controller with its own action seed, so results do not depend on the global RNG state and one
+    object may sit in both seats (a PoolOpponent then draws its members independently per seat).
+    `env_kw`: extra TagVecEnv options (zero_sum, share_vel), which must match how the controllers were trained.
+    Returns {"adv", "good", "adv_se", "good_se"}: mean and standard error over episodes of the episode return;
+    with `return_episodes`, also "returns" ([episode][role]) for paired deviation estimates.
+    """
     import copy
     if num_episodes < 1 or max_cycles < 1:
         raise ValueError("Episode count and horizon must be positive")
