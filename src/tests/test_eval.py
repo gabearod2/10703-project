@@ -280,8 +280,20 @@ def test_fsp_end_to_end():
     assert os.path.exists(os.path.join(args.out_dir, "exploit_avg", "exploitability.json"))
     cfg = json.load(open(os.path.join(r["adv"]["selected"]["run_dir"], "config.json")))
     assert cfg["opponent"] == "pool" and cfg["opponent_ckpt"].endswith("pool")                       # BR trained vs the mixture
-    M = exploit.crossplay([os.path.join(args.out_dir, "final.pt"), os.path.join(args.out_dir, "pool")], episodes=6,
-                          out=os.path.join(d, "cp"))
+    from unittest.mock import patch
+    pool = os.path.join(args.out_dir, "pool")
+    assert all(exploit.checkpoint_label(i, path).endswith(os.path.basename(path)[:-3]) for i, path in enumerate(snaps))
+    assert exploit.checkpoint_label(0, pool).endswith(" (avg)")
+    with patch.object(exploit, "load_policy", wraps=load_policy) as load, patch.object(
+            PoolOpponent, "from_dir", wraps=PoolOpponent.from_dir) as load_pool:
+        M = exploit.crossplay([snaps[0], pool], episodes=6, out=os.path.join(d, "cp"), labels=["initial", "mixture"])
+    load.assert_called_once()
+    load_pool.assert_called_once()
+    with open(os.path.join(d, "cp.json")) as f:
+        assert json.load(f)["labels"] == ["initial", "mixture"]
+    reference = play_match(PoolOpponent.from_dir(pool, 0), PoolOpponent.from_dir(pool, 0), 6,
+                           args.max_cycles, 12345, args.symmetric, zero_sum=args.zero_sum, share_vel=args.share_vel)
+    np.testing.assert_array_equal(M[1, 1], [reference["adv"], reference["good"]])
     assert M.shape == (2, 2, 2) and np.allclose(M[:, :, 0], -M[:, :, 1])                             # zero-sum game
     print("PASS --algo fsp (snapshots, pool grows), nashconv --average (BR vs mixture), crossplay with a pool")
 
