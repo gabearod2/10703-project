@@ -1,0 +1,23 @@
+# Two-minute check that the whole sweep pipeline (train, best responses, cross-play, fixed opponents) runs on the GPU.
+# python sweep.py --config configs/smoke_cuda.yaml --out_dir runs/smoke_cuda
+grid:
+  ent_coef: [0.01, 0.2]
+seeds: [0]
+fixed:
+  penalty: none
+  hidden: [512, 512, 512]
+  total_steps: 8192
+  threads: 1
+  device: cuda
+br:
+  steps: 4096
+  seeds: 1
+  seed: 10000
+  episodes: 20
+  eval_seed: 100000
+  report_seed: 200000
+  init: warm
+  args: '--ent_coef 0.05 --clip_coef 0.1 --penalty none'
+comparisons:
+  episodes: 20
+  seed: 300000

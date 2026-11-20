@@ -17,7 +17,7 @@ from matplotlib.animation import FuncAnimation, PillowWriter
 from matplotlib.patches import Circle
 
 from envs.tag import TagVecEnv, ADV, GOOD
-from algos.networks import GaussianActorCritic
+from opponents import load_policy
 
 COL = {ADV: "#d62728", GOOD: "#2ca02c"}
 
@@ -28,7 +28,7 @@ def rollout(policy, venv, episodes, seed, deterministic):
         o, _ = e.reset(seed=seed + ep)
         states, cum, rets = [venv.get_state(0)], np.zeros(2), [np.zeros(2)]
         for _ in range(venv.max_cycles):
-            x = torch.as_tensor(venv._encode(o))                                  # [2, D]
+            x = torch.as_tensor(venv._encode(o, 0))                                  # [2, D]
             with torch.no_grad():
                 a, _, _ = policy.act(x, deterministic=deterministic)
             a = policy.to_env(a).numpy()
@@ -70,9 +70,7 @@ def main():
     cfg = json.load(open(os.path.join(a.run_dir, "config.json")))
     venv = TagVecEnv(1, cfg["max_cycles"], seed=a.seed, symmetric=cfg.get("symmetric", True),
                       zero_sum=cfg.get("zero_sum", False), share_vel=cfg.get("share_vel", False))
-    policy = GaussianActorCritic(venv.obs_dim, venv.act_dim, venv.act_low, venv.act_high, tuple(cfg["hidden"]))
-    policy.load_state_dict(torch.load(os.path.join(a.run_dir, a.ckpt), map_location="cpu"))
-    policy.eval()
+    policy = load_policy(os.path.join(a.run_dir, a.ckpt))     # dims (incl. masked no_op) come from the checkpoint
     eps = rollout(policy, venv, a.episodes, a.seed, deterministic=not a.stochastic)
     out = a.out or os.path.join(a.run_dir, "rollout")
     for i, ep in enumerate(eps):

@@ -110,7 +110,7 @@ class TagVecEnv:
           final_obs  [N,2,D]  true successor obs (== obs unless the episode ended)
           reward     [N,2]
           terminated [N] bool, truncated [N] bool
-          episodes   list of dicts {ret: [adv, good], len} for episodes finishing this step
+          episodes   list of dicts {ret: [adv, good], len, env} for episodes finishing this step
         """
         actions = np.clip(actions, self.act_low, self.act_high).astype(np.float32)
         N = self.num_envs
@@ -131,7 +131,7 @@ class TagVecEnv:
             self._ep_ret[i] += rew[i]
             self._ep_len[i] += 1
             if term[i] or trunc[i]:
-                episodes.append({"ret": self._ep_ret[i].copy(), "len": int(self._ep_len[i])})
+                episodes.append({"ret": self._ep_ret[i].copy(), "len": int(self._ep_len[i]), "env": i})
                 self._ep_ret[i] = 0
                 self._ep_len[i] = 0
                 o2, _ = e.reset()

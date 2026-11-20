@@ -1,0 +1,26 @@
+# Two-minute check that the fictitious self-play pipeline (pool opponent, average-policy scoring) runs on the GPU.
+# python sweep.py --config configs/smoke_fsp_cuda.yaml --out_dir runs/smoke_fsp_cuda
+grid:
+  ent_coef: [0.01]
+seeds: [0]
+fixed:
+  algo: fsp
+  snapshot_every: 2
+  penalty: none
+  hidden: [512, 512, 512]
+  num_envs: 16
+  total_steps: 16384
+  threads: 1
+  device: cuda
+br:
+  steps: 4096
+  seeds: 1
+  seed: 10000
+  episodes: 20
+  eval_seed: 100000
+  report_seed: 200000
+  init: warm
+  args: '--ent_coef 0.05 --clip_coef 0.1 --penalty none'
+comparisons:
+  episodes: 20
+  seed: 300000

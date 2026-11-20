@@ -31,7 +31,7 @@ def table(path, rows):
 
 
 def expand(cfg):
-    defaults = vars(train.get_args([], create_dir=False))
+    defaults = vars(train.argument_parser().parse_args([]))
     reserved = {'seed', 'out_dir', 'learner', 'opponent', 'opponent_ckpt', 'init_ckpt', 'eval_every'}
     names = set(cfg['grid']) | set(cfg['fixed'])
     if names - defaults.keys() or names & reserved or set(cfg['grid']) & set(cfg['fixed']):
@@ -50,7 +50,9 @@ def expand(cfg):
             args = dict(defaults, **fixed)
             args.update(zip(grid, values))
             args.update(learner='both', eval_every=0)
-            n = args['num_envs'] * args['num_steps'] * 2
+            args = vars(train.finalize_args(Namespace(**args)))
+            learners = 1 if args['algo'] == 'fsp' else 2
+            n = args['num_envs'] * args['num_steps'] * learners
             if args['num_minibatches'] < 1 or n % args['num_minibatches'] or n // args['num_minibatches'] < 2:
                 raise ValueError('Invalid minibatch division')
             if args['total_steps'] < args['num_envs'] * args['num_steps']:
@@ -70,6 +72,17 @@ def run(cfg, root, compare=True):
     if snapshot.exists() and json.loads(snapshot.read_text()) != cfg:
         raise ValueError('Config changed; use a new output directory')
     configurations = expand(cfg)
+    for index, settings in enumerate(configurations):
+        for seed in cfg['seeds']:
+            candidate = root / f'config_{index:03d}' / f'seed_{seed}' / 'candidate'
+            config_path = candidate / 'config.json'
+            if config_path.exists():
+                saved_mask = json.loads(config_path.read_text()).get('mask_noop', False)
+                if saved_mask != settings['mask_noop']:
+                    raise ValueError(f"{candidate}: saved mask_noop={saved_mask}, requested {settings['mask_noop']}; "
+                                     "use a new output directory")
+            elif (candidate / 'complete.json').exists():
+                raise ValueError(f"{candidate}: completed trial is missing config.json")
     save(snapshot, cfg)
     rows, checkpoints = [], []
     for index, settings in enumerate(configurations):
@@ -86,21 +99,39 @@ def run(cfg, root, compare=True):
                     with (candidate / 'console.log').open('w') as log, contextlib.redirect_stdout(log):
                         train.train(Namespace(**args))
                     save(candidate / 'complete.json', {'finished': True})
+                b = cfg['br']
                 if metrics_path.exists():
                     metric = json.loads(metrics_path.read_text())
                 else:
-                    b = cfg['br']
                     with (directory / 'exploit.log').open('w') as log, contextlib.redirect_stdout(log):
                         metric = exploit.nashconv(str(candidate), br_steps=b['steps'], br_seeds=b['seeds'],
                             seed=b['seed'], episodes=b['episodes'], eval_seed=b['eval_seed'], report_seed=b['report_seed'],
                             out_dir=str(directory / 'exploit'), br_init=b['init'], br_args=b['args'],
                             device=args['device'], threads=args['threads'])
                     save(metrics_path, metric)
-                rows.append(dict(configuration=index, seed=seed, status='complete', nashconv=metric['nashconv'],
-                                 adv_gap=metric['adv']['gap'], good_gap=metric['good']['gap'],
-                                 checkpoint=str(candidate / 'final.pt')))
+                row = dict(configuration=index, seed=seed, status='complete', nashconv=metric['nashconv'],
+                           adv_gap=metric['adv']['gap'], good_gap=metric['good']['gap'],
+                           checkpoint=str(candidate / 'final.pt'))
+                note = ''
+                if settings.get('algo') == 'fsp':
+                    # Fictitious self-play: also score the AVERAGE policy (uniform mixture over candidate/pool),
+                    # which is the policy fictitious play's convergence guarantee is about.
+                    average_path = directory / 'metrics_avg.json'
+                    if average_path.exists():
+                        average = json.loads(average_path.read_text())
+                    else:
+                        with (directory / 'exploit_avg.log').open('w') as log, contextlib.redirect_stdout(log):
+                            average = exploit.nashconv(str(candidate), br_steps=b['steps'], br_seeds=b['seeds'],
+                                seed=b['seed'], episodes=b['episodes'], eval_seed=b['eval_seed'], report_seed=b['report_seed'],
+                                out_dir=str(directory / 'exploit_avg'), br_init=b['init'], br_args=b['args'],
+                                device=args['device'], threads=args['threads'], average=True)
+                        save(average_path, average)
+                    row.update(nashconv_avg=average['nashconv'], adv_gap_avg=average['adv']['gap'],
+                               good_gap_avg=average['good']['gap'], pool=str(candidate / 'pool'))
+                    note = f' | average policy NashConv={average["nashconv"]:.4f}'
+                rows.append(row)
                 checkpoints.append(str(candidate / 'final.pt'))
-                print(f'config {index}, seed {seed}: NashConv={metric["nashconv"]:.4f}', flush=True)
+                print(f'config {index}, seed {seed}: NashConv={metric["nashconv"]:.4f}{note}', flush=True)
             except Exception as error:
                 import traceback
                 save(directory / 'failure.json', dict(error=repr(error), traceback=traceback.format_exc()))
@@ -114,6 +145,10 @@ def run(cfg, root, compare=True):
             rankings.append(dict(configuration=i, mean_nashconv=float(np.mean(scores)),
                                  std_nashconv=float(np.std(scores, ddof=1)) if len(scores)>1 else 0.,
                                  n_seeds=len(scores)))
+            averages = [r['nashconv_avg'] for r in rows if r['configuration'] == i and 'nashconv_avg' in r]
+            if len(averages) == len(scores):                      # fsp configurations: average-policy score as well
+                rankings[-1].update(mean_nashconv_avg=float(np.mean(averages)),
+                                    std_nashconv_avg=float(np.std(averages, ddof=1)) if len(averages)>1 else 0.)
     rankings.sort(key=lambda r: (r['mean_nashconv'], r['configuration']))
     table(root / 'rankings.csv', rankings)
     save(root / 'configurations.json', configurations)
@@ -138,11 +173,22 @@ def run(cfg, root, compare=True):
     if compare and checkpoints:
         c = cfg['comparisons']
         successful = [r for r in rows if r['status'] == 'complete']
-        exploit.crossplay(checkpoints, episodes=c['episodes'], seed=c['seed'], out=str(root / 'crossplay'),
-                          device=settings['device'],
-                          labels=[f"Config {r['configuration']} | seed {r['seed']}" for r in successful],
-                          configuration_ids=[r['configuration'] for r in successful],
-                          seeds=[r['seed'] for r in successful], expected_seeds=cfg['seeds'])
+        extra = list(cfg.get('crossplay_with', []))               # e.g. self-play checkpoints from another sweep
+        for path in [e for e in extra if not Path(e).exists()]:
+            print(f'crossplay_with: {path} not found, skipped', flush=True)
+        extra = [e for e in extra if Path(e).exists()]
+        pooled = [r for r in successful if r.get('pool')]          # a pool directory plays as its average policy
+        # Extras and pools get no configuration id, so they appear in the per-checkpoint plot but not the
+        # configuration-averaged one.
+        exploit.crossplay(extra + checkpoints + [r['pool'] for r in pooled], episodes=c['episodes'], seed=c['seed'],
+                          out=str(root / 'crossplay'), device=settings['device'],
+                          labels=[exploit.checkpoint_label(n, e) for n, e in enumerate(extra)]
+                                 + [f"Config {r['configuration']} | seed {r['seed']}" for r in successful]
+                                 + [f"Config {r['configuration']} | seed {r['seed']} (avg)" for r in pooled],
+                          configuration_ids=[None] * len(extra) + [r['configuration'] for r in successful]
+                                            + [None] * len(pooled),
+                          seeds=[None] * len(extra) + [r['seed'] for r in successful] + [None] * len(pooled),
+                          expected_seeds=cfg['seeds'])
         fixed, episode_records = [], []
         for row in rows:
             if row['status'] != 'complete': continue
@@ -151,7 +197,7 @@ def run(cfg, root, compare=True):
             for role in (0, 1):
                 for name in ('random', 'scripted'):
                     ctrl = PolicyOpponent(policy, device=opts['device'])
-                    opponent = make_opponent(name, role ^ 1, policy.act_dim, seed=c['seed'])
+                    opponent = make_opponent(name, role ^ 1, policy.low.numel(), seed=c['seed'])   # env action dim (policy's excludes masked no_op)
                     pair = (ctrl, opponent) if role == 0 else (opponent, ctrl)
                     m = play_match(*pair, c['episodes'], opts['max_cycles'], c['seed'], opts['symmetric'],
                                    return_episodes=True, zero_sum=opts['zero_sum'], share_vel=opts['share_vel'])

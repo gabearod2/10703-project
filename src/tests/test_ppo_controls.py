@@ -320,7 +320,7 @@ class TestTrainingModes(unittest.TestCase):
                     self.assertEqual(len(log["eval"]), 1)
                     for name in ("final.pt", "latest.pt", "training_curves.png"):
                         self.assertTrue((run / name).is_file(), name)
-                    policy = GaussianActorCritic(14, 5, np.zeros(5), np.ones(5), hidden=(16, 16))
+                    policy = GaussianActorCritic(14, 4, np.zeros(5), np.ones(5), hidden=(16, 16))   # no_op masked by default
                     policy.load_state_dict(torch.load(run / "final.pt", map_location="cpu", weights_only=True))
                     actions, _, _ = policy.act(torch.zeros(4, 14))
                     env_actions = policy.to_env(actions)

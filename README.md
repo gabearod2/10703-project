@@ -21,6 +21,10 @@ the chaser's velocity were the asymmetries. By default both are removed:
   also gains when the runner leaves the arena. NashConv is then the standard zero-sum exploitability. Opt out with `--no_zero_sum`.
 - shared velocity: the runner also observes the chaser's velocity (in padded slots, so `obs_dim` stays 14). Opt out with `--no_share_vel`.
 
+- masked `no_op`: MPE2's continuous action is `[no_op, left, right, down, up]` and the dynamics ignore `no_op`. The policy therefore has
+  4 action dims and `no_op` is always sent as 0, so a dimension that does nothing no longer adds to entropy, KL or W2. Opt out with
+  `--no_mask_noop`. Older 5-dim checkpoints still load (the size is read from the checkpoint) and get 5-dim best responses.
+
 `exploit.py` / `visualize.py` read these from the run's `config.json`, so best responses are trained in the same game. Runs made
 before these flags existed have no entry and are treated as the original game. Numbers from different variants are not comparable.
 
@@ -41,6 +45,9 @@ python tests/test_eval.py
 # naive self-play: one network plays both roles
 python train.py --total_steps 3000000 --seed 0 --out_dir runs/sp_s0
 
+# fictitious self-play baseline: learn against a pool of own past snapshots (see "Fictitious self-play" below)
+python train.py --algo fsp --num_envs 16 --total_steps 6000000 --seed 0 --out_dir runs/fsp_s0
+
 # best response: one role learns against a fixed opponent (random, scripted, or a frozen checkpoint)
 python train.py --learner adv  --opponent random
 python train.py --learner good --opponent scripted
@@ -52,7 +59,7 @@ python visualize.py --run_dir <dir> --episodes 6 --stochastic
 ```
 
 Useful flags for `train.py`: `--ent_coef`, `--lr`, `--total_steps`, `--seed`, `--threads`, `--device cuda`,
-`--asymmetric` (original MPE2 roles; default is identical dynamics for both players), `--no_zero_sum`, `--no_share_vel`, `--out_dir`.
+`--asymmetric` (original MPE2 roles; default is identical dynamics for both players), `--no_zero_sum`, `--no_share_vel`, `--no_mask_noop`, `--algo fsp`, `--snapshot_every`, `--out_dir`.
 Frozen-opponent flags: `--opponent ckpt --opponent_ckpt <.pt or run dir>`, `--opponent_deterministic` (opponent plays its mean
 action; default samples), `--init_ckpt <.pt or run dir>` (start the learner from a checkpoint).
 Every PPO hyperparameter is a flag; `python train.py -h` lists them all.
@@ -101,6 +108,36 @@ no-op at action index 0 and use squared-distance units for `--penalty_target`.
 
 `kl` remains the approximate KL averaged during optimization. `clipfrac` remains the fraction of
 sampled ratios outside the clipping interval, even when policy clipping is disabled.
+
+## Fictitious self-play (`--algo fsp`)
+
+Baseline to compare naive self-play against. Naive self-play always trains against the *current* policy; fictitious play
+best-responds to the *average* of all past policies, and it is that average which converges to a Nash equilibrium in two-player zero-sum games.
+
+- Every `--snapshot_every` iterations (default 50 for fsp) the network is saved to `<run>/pool/snap_<iter>.pt` and joins the pool
+  (the initial policy is member 0).
+- In each env the learner controls one role (chaser in even envs, runner in odd ones) and a pool member plays the other. The member
+  is drawn uniformly at the start of every episode, so the opponent is the uniform average of the past snapshots.
+- One network still learns both roles with the same PPO update. Logged `ep_ret_adv` / `ep_ret_good` are the learner's return as
+  chaser / runner against the pool.
+- Only one agent per env learns, so fsp collects half the learner samples of self-play per env step. `--num_envs 16 --total_steps 6000000`
+  matches a 3M-step self-play run in samples per update and number of updates.
+- A run produces two policies: `final.pt` (the last iterate, a best response to the average) and the **average policy** (the pool).
+  Evaluate both; fictitious play's guarantee is about the average:
+
+```bash
+python exploit.py nashconv --ckpt runs/fsp_s0/<run>/final.pt        # last iterate
+python exploit.py nashconv --ckpt runs/fsp_s0/<run> --average       # average policy -> <run>/exploit_avg/
+python exploit.py crossplay --ckpts runs/sp_s0/<run>/final.pt runs/fsp_s0/<run>/final.pt runs/fsp_s0/<run>/pool
+```
+
+`sweep.py` handles fsp configs too: with `algo: fsp` in `fixed` it scores both the final iterate (`nashconv`) and the average
+policy (`nashconv_avg`), and an optional top-level `crossplay_with` list adds outside checkpoints (e.g. the self-play baseline)
+to the final cross-play. See `configs/fsp_comparison.yaml`.
+
+The average policy is played as a mixture (one member per episode), not distilled into one network. With `--average` the best response
+trains against that mixture and is warm-started from `final.pt`. `--snapshot_every N` also works with plain self-play: it only saves
+the snapshots (about 4 MB each), e.g. for cross-play over training time.
 
 ## Evaluation: exploitability and cross-play
 
