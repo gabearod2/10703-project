@@ -17,7 +17,7 @@ import torch
 from envs.tag import TagVecEnv, ADV, GOOD
 from algos.networks import GaussianActorCritic
 from algos.ppo import PENALTY_DISTANCES, PPO, compute_gae
-from algos.rollout import collect_rollout
+from algos.rollout import collect_rollout, learner_obs
 from opponents import make_opponent, load_policy, PoolOpponent
 from utils.evaluate import evaluate
 from utils.plotting import plot_log
