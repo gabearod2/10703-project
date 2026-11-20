@@ -15,7 +15,7 @@ import torch
 
 from envs.tag import TagVecEnv, ADV, GOOD
 from algos.networks import GaussianActorCritic
-from algos.ppo import PPO, compute_gae
+from algos.ppo import PENALTY_DISTANCES, PPO, compute_gae
 from algos.rollout import collect_rollout
 from opponents import make_opponent, load_policy
 from utils.evaluate import evaluate
@@ -147,7 +147,7 @@ def get_args(argv=None, create_dir=True):
     p.add_argument("--clip_coef", type=float, default=0.1, help="shared policy and value clipping threshold")
     p.add_argument("--clip_policy", type=lambda s: s.lower() != "false", default=True,
                    help="enable policy-ratio clipping (true/false); independent of --clip_vloss")
-    p.add_argument("--penalty", choices=["none", "kl", "wasserstein-2"], default="none",
+    p.add_argument("--penalty", choices=["none", *PENALTY_DISTANCES], default="none",
                    help="adaptive Gaussian distance penalty (default: none)")
     p.add_argument("--penalty_target", type=positive_float, default=0.01,
                    help="target final selected distance for penalty adaptation; separate from --target_kl early stopping")

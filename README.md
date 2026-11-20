@@ -83,6 +83,13 @@ With `--penalty kl`, the minimized loss adds `beta * mean(KL(old || new))`.
 With `--penalty wasserstein-2`, the loss instead adds `beta * mean(W2)` where
 `W2 = sqrt(sum((new_mean - old_mean)^2 + (new_std - old_std)^2))` across action dimensions.
 
+The midway report defines two penalties on the unclipped Gaussian policy. Both ignore the
+no-op at action index 0 and use squared-distance units for `--penalty_target`.
+
+- `--penalty ot-action` uses squared W2 across the four directional forces (left, right, down, up).
+- `--penalty ot-movement` uses squared W2 on the net force (right − left, up − down).
+  Each axis has variance equal to the sum of its two independent force variances.
+
 `--target_kl` is the existing, separate **approximate-KL early-stopping threshold**, disabled by default.
 
 `training_log.json` metrics:
