@@ -31,7 +31,7 @@ def table(path, rows):
 
 
 def expand(cfg):
-    defaults = vars(train.get_args([], create_dir=False))
+    defaults = vars(train.argument_parser().parse_args([]))
     reserved = {'seed', 'out_dir', 'learner', 'opponent', 'opponent_ckpt', 'init_ckpt', 'eval_every'}
     names = set(cfg['grid']) | set(cfg['fixed'])
     if names - defaults.keys() or names & reserved or set(cfg['grid']) & set(cfg['fixed']):
@@ -50,7 +50,9 @@ def expand(cfg):
             args = dict(defaults, **fixed)
             args.update(zip(grid, values))
             args.update(learner='both', eval_every=0)
-            n = args['num_envs'] * args['num_steps'] * 2
+            args = vars(train.finalize_args(Namespace(**args)))
+            learners = 1 if args['algo'] == 'fsp' else 2
+            n = args['num_envs'] * args['num_steps'] * learners
             if args['num_minibatches'] < 1 or n % args['num_minibatches'] or n // args['num_minibatches'] < 2:
                 raise ValueError('Invalid minibatch division')
             if args['total_steps'] < args['num_envs'] * args['num_steps']:
@@ -70,6 +72,17 @@ def run(cfg, root, compare=True):
     if snapshot.exists() and json.loads(snapshot.read_text()) != cfg:
         raise ValueError('Config changed; use a new output directory')
     configurations = expand(cfg)
+    for index, settings in enumerate(configurations):
+        for seed in cfg['seeds']:
+            candidate = root / f'config_{index:03d}' / f'seed_{seed}' / 'candidate'
+            config_path = candidate / 'config.json'
+            if config_path.exists():
+                saved_mask = json.loads(config_path.read_text()).get('mask_noop', False)
+                if saved_mask != settings['mask_noop']:
+                    raise ValueError(f"{candidate}: saved mask_noop={saved_mask}, requested {settings['mask_noop']}; "
+                                     "use a new output directory")
+            elif (candidate / 'complete.json').exists():
+                raise ValueError(f"{candidate}: completed trial is missing config.json")
     save(snapshot, cfg)
     rows, checkpoints = [], []
     for index, settings in enumerate(configurations):

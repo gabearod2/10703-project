@@ -160,7 +160,7 @@ def positive_float(value):
     return value
 
 
-def get_args(argv=None, create_dir=True):
+def argument_parser():
     p = argparse.ArgumentParser("Self-play PPO (Gaussian) on 1v1 MPE2 Simple Tag")
     p.add_argument("--total_steps", type=int, default=2_000_000, help="env steps (per-env transitions, summed over envs)")
     p.add_argument("--num_envs", type=int, default=8)
@@ -221,15 +221,29 @@ def get_args(argv=None, create_dir=True):
     p.add_argument("--eval_every", type=int, default=50, help="iterations between evals (0=off)")
     p.add_argument("--eval_episodes", type=int, default=50)
     p.add_argument("--out_dir", type=str, default="runs/selfplay_ppo")
-    a = p.parse_args(argv)
+    return p
+
+
+def finalize_args(a):
     if a.opponent in ("ckpt", "pool") and a.learner != "both" and not a.opponent_ckpt:
-        p.error(f"--opponent {a.opponent} requires --opponent_ckpt")
+        raise ValueError(f"--opponent {a.opponent} requires --opponent_ckpt")
     if a.algo == "fsp" and a.learner != "both":
-        p.error("--algo fsp trains both roles; do not combine it with --learner adv/good")
+        raise ValueError("--algo fsp trains both roles; do not combine it with --learner adv/good")
     if a.snapshot_every is None:
         a.snapshot_every = 50 if a.algo == "fsp" else 0
     if a.algo == "fsp" and a.snapshot_every <= 0:
-        p.error("--algo fsp needs --snapshot_every > 0")
+        raise ValueError("--algo fsp needs --snapshot_every > 0")
+    if a.algo == "fsp" and a.num_envs < 2:
+        raise ValueError("--algo fsp needs at least two environments because learner roles are assigned by environment")
+    return a
+
+
+def get_args(argv=None, create_dir=True):
+    p = argument_parser()
+    try:
+        a = finalize_args(p.parse_args(argv))
+    except ValueError as error:
+        p.error(str(error))
     if create_dir:
         a.out_dir = create_run_dir(a.out_dir)
     return a
