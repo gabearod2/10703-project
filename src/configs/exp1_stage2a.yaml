@@ -1,0 +1,49 @@
+# Experiment 1, stage 2a: two more seeds (3, 4) for the four stage-1 configurations that are statistically tied
+# (stage-1 configs 0 base, 8 lr=0.002, 10 num_minibatches=8, 11 num_steps=64). Seeds 0-2 are in runs/exp1_stage1.
+# 4 configurations x 2 seeds = 8 trials.
+#   python sweep.py --config configs/exp1_stage2a.yaml --out_dir runs/exp1_stage2a --jobs 4
+grid: {}
+variants:
+  - {}                                     # = stage-1 config 0 (base)
+  - grid: {lr: [0.002]}                    # = stage-1 config 8
+  - grid: {num_minibatches: [8]}           # = stage-1 config 10
+  - grid: {num_steps: [64]}                # = stage-1 config 11
+seeds: [3, 4]
+fixed:
+  penalty: none
+  clip_policy: true
+  ent_coef: 0.01
+  clip_coef: 0.1
+  lr: 0.00025
+  anneal_lr: true
+  num_envs: 8
+  num_steps: 128
+  num_minibatches: 4
+  update_epochs: 4
+  gamma: 0.99
+  gae_lambda: 0.95
+  vf_coef: 0.5
+  max_grad_norm: 0.5
+  norm_adv: true
+  clip_vloss: true
+  target_kl: null
+  hidden: [512, 512, 512]
+  total_steps: 2000000
+  zero_sum: true
+  share_vel: true
+  symmetric: true
+  max_cycles: 25
+  threads: 1
+  device: cpu
+br:
+  steps: 1000000
+  seeds: 4
+  seed: 10000
+  episodes: 200
+  eval_seed: 100000
+  report_seed: 200000
+  init: warm
+  args: '--ent_coef 0 --clip_coef 0.1 --penalty none'
+comparisons:
+  episodes: 200
+  seed: 300000

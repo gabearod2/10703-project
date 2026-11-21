@@ -1,0 +1,49 @@
+# Experiment 1, stage 2b: (1) combine the "more updates" settings that helped in stage 1, (2) test whether a larger
+# training budget keeps lowering NashConv (i.e. whether 2M steps is budget-limited). 5 configurations x 5 seeds.
+#   python sweep.py --config configs/exp1_stage2b.yaml --out_dir runs/exp1_stage2b --jobs 10
+grid: {}
+variants:
+  - grid: {num_minibatches: [8], num_steps: [64]}          # both update-count levers
+  - grid: {lr: [0.0005]}                                   # between base 2.5e-4 and the unstable 2e-3
+  - grid: {lr: [0.0005], num_minibatches: [8]}
+  - grid: {total_steps: [4000000]}                         # base, 2x budget
+  - grid: {total_steps: [4000000], num_minibatches: [8]}   # most reliable stage-1 config, 2x budget
+seeds: [0, 1, 2, 3, 4]
+fixed:
+  penalty: none
+  clip_policy: true
+  ent_coef: 0.01
+  clip_coef: 0.1
+  lr: 0.00025
+  anneal_lr: true
+  num_envs: 8
+  num_steps: 128
+  num_minibatches: 4
+  update_epochs: 4
+  gamma: 0.99
+  gae_lambda: 0.95
+  vf_coef: 0.5
+  max_grad_norm: 0.5
+  norm_adv: true
+  clip_vloss: true
+  target_kl: null
+  hidden: [512, 512, 512]
+  total_steps: 2000000
+  zero_sum: true
+  share_vel: true
+  symmetric: true
+  max_cycles: 25
+  threads: 1
+  device: cpu
+br:
+  steps: 1000000
+  seeds: 4
+  seed: 10000
+  episodes: 200
+  eval_seed: 100000
+  report_seed: 200000
+  init: warm
+  args: '--ent_coef 0 --clip_coef 0.1 --penalty none'
+comparisons:
+  episodes: 200
+  seed: 300000
