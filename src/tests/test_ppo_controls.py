@@ -19,11 +19,31 @@ sys.path.insert(0, str(SRC))
 import numpy as np
 import torch
 
-from algos.ppo import PPO, adapt_penalty_coef, gaussian_kl, gaussian_wasserstein2, ppo_loss
+from algos.ppo import PPO, adapt_penalty_coef, gaussian_kl, gaussian_wasserstein2, ot_action, ot_movement, ppo_loss
 import train
 
 
 class TestLoss(unittest.TestCase):
+    def test_tag_ot_values_and_gradients(self):
+        # Rows change the no-op alone, both axes, cancelling means, or swapped stds.
+        for distance_fn, expected in [(ot_action, [0., 93., 8., 2.]),
+                                      (ot_movement, [0., 63., 0., 0.])]:
+            old_mean = torch.zeros(4, 5, requires_grad=True)
+            old_std = torch.tensor([[1., 3., 4., 3., 4.]] * 4, requires_grad=True)
+            new_mean = torch.tensor([[9., 0., 0., 0., 0.], [9., 1., 3., 2., 5.],
+                                     [9., 2., 2., 0., 0.], [9., 0., 0., 0., 0.]], requires_grad=True)
+            new_std = torch.tensor([[7., 3., 4., 3., 4.], [7., 6., 8., 8., 6.],
+                                    [7., 3., 4., 3., 4.], [7., 4., 3., 3., 4.]], requires_grad=True)
+            costs = distance_fn(old_mean, old_std, torch.distributions.Normal(new_mean, new_std))
+            torch.testing.assert_close(costs, torch.tensor(expected), atol=0, rtol=0)
+            costs.sum().backward()
+            self.assertIsNone(old_mean.grad)
+            self.assertIsNone(old_std.grad)
+            for grad in (new_mean.grad, new_std.grad):
+                self.assertTrue(torch.isfinite(grad).all())
+                self.assertTrue((grad[:, 0] == 0).all())
+                self.assertGreater(grad[1, 1:].abs().sum().item(), 0.)
+
     def test_wasserstein_values_and_gradients(self):
         for mean, std, expected in [([0., 0.], [1., 1.], 0.),
                                     ([3., 4.], [1., 1.], 5.),
@@ -113,8 +133,8 @@ class _ToyPolicy(torch.nn.Module):
     """Observation-dependent means make full-batch and minibatch KL distinguishable."""
     def __init__(self):
         super().__init__()
-        self.mean_weight = torch.nn.Parameter(torch.zeros(2))
-        self.log_std = torch.nn.Parameter(torch.zeros(2))
+        self.mean_weight = torch.nn.Parameter(torch.zeros(5))
+        self.log_std = torch.nn.Parameter(torch.zeros(5))
         self.value_bias = torch.nn.Parameter(torch.zeros(()))
 
     def dist(self, obs):
@@ -125,7 +145,7 @@ class _ToyPolicy(torch.nn.Module):
 
 
 def make_batch(policy):
-    obs = torch.arange(1, 17, dtype=torch.float32).reshape(8, 2) / 10
+    obs = torch.arange(1, 41, dtype=torch.float32).reshape(8, 5) / 10
     act = torch.zeros_like(obs)
     with torch.no_grad():
         logp = policy.dist(obs).log_prob(act).sum(-1)
@@ -135,8 +155,8 @@ def make_batch(policy):
 
 class TestUpdate(unittest.TestCase):
     def test_adaptation_uses_final_policy_once_and_carries_to_next_update(self):
-        for mode, early_stop in [(m, e) for m in ("kl", "wasserstein-2") for e in (False, True)]:
-            with self.subTest(early_stop=early_stop):
+        for mode, early_stop in [(m, e) for m in ("kl", "wasserstein-2", "ot-action", "ot-movement") for e in (False, True)]:
+            with self.subTest(mode=mode, early_stop=early_stop):
                 policy = _ToyPolicy()
                 args = SimpleNamespace(lr=.01, penalty_coef_init=1., penalty=mode, penalty_target=.001,
                                        num_minibatches=2, update_epochs=3, norm_adv=False,
@@ -167,10 +187,22 @@ class TestUpdate(unittest.TestCase):
                         ).sum(-1).mean().item()
                     self.assertEqual(step_coefficients, [expected_coef] * (2 if early_stop else 6))
                     self.assertAlmostEqual(stats["kl_exact_final"], expected_kl)
-                    expected_distance = (expected_kl if mode == "kl" else
-                                         gaussian_wasserstein2(old_mean, old_std, policy.dist(batch["obs"])).mean().item())
-                    self.assertAlmostEqual(stats["penalty_distance_final"], expected_distance)
-                    adapt.assert_called_once_with(expected_coef, expected_distance, args.penalty_target)
+                    final = policy.dist(batch["obs"])
+                    dm = final.mean - old_mean
+                    ds = final.stddev - old_std
+                    if mode == "ot-action":
+                        expected_distance = (dm[:, 1:].square() + ds[:, 1:].square()).sum(-1).mean().item()
+                    elif mode == "ot-movement":
+                        # This toy policy changes every std equally, so each projected
+                        # std changes by sqrt(2) times the shared per-force change.
+                        expected_distance = ((dm[:, 2] - dm[:, 1]).square() + (dm[:, 4] - dm[:, 3]).square()
+                                             + 4 * ds[:, 1].square()).mean().item()
+                    elif mode == "wasserstein-2":
+                        expected_distance = gaussian_wasserstein2(old_mean, old_std, final).mean().item()
+                    else:
+                        expected_distance = expected_kl
+                    np.testing.assert_allclose(stats["penalty_distance_final"], expected_distance, rtol=1e-5)
+                    adapt.assert_called_once_with(expected_coef, stats["penalty_distance_final"], args.penalty_target)
                     self.assertEqual(stats["penalty_coef_used"], expected_coef)
                     self.assertEqual(stats["penalty_coef_next"], expected_coef * 2)
                     self.assertEqual(ppo.beta, expected_coef * 2)
@@ -242,7 +274,7 @@ class TestRunConfiguration(unittest.TestCase):
             self.assertEqual(defaults.penalty_target, .01)
             self.assertEqual(defaults.penalty_coef_init, 1.)
             self.assertIsNone(defaults.target_kl)
-            for clip, kl in [(c, m) for c in ("false", "true") for m in ("none", "kl", "wasserstein-2")]:
+            for clip, kl in [(c, m) for c in ("false", "true") for m in ("none", "kl", "wasserstein-2", "ot-action", "ot-movement")]:
                 args = train.get_args(["--out_dir", root, "--clip_policy", clip, "--penalty", kl])
                 self.assertEqual(args.clip_policy, clip == "true")
                 self.assertEqual(args.penalty, kl)
@@ -255,7 +287,7 @@ class TestTrainingModes(unittest.TestCase):
         from algos.networks import GaussianActorCritic
 
         with tempfile.TemporaryDirectory() as root:
-            for clip, kl in [(c, m) for c in ("false", "true") for m in ("none", "kl", "wasserstein-2")]:
+            for clip, kl in [(c, m) for c in ("false", "true") for m in ("none", "kl", "wasserstein-2", "ot-action", "ot-movement")]:
                 with self.subTest(clip=clip, kl=kl):
                     base = Path(root) / f"clip_{clip}_kl_{kl}"
                     result = subprocess.run(

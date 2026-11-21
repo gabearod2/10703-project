@@ -32,15 +32,47 @@ def gaussian_kl(old_mean, old_std, new_dist):
     return torch.distributions.kl_divergence(old_dist, new_dist).sum(-1)
 
 
+def _wasserstein_delta(old_mean, old_std, new_mean, new_std):
+    return torch.cat((new_mean - old_mean.detach(), new_std - old_std.detach()), dim=-1)
+
+
 def gaussian_wasserstein2(old_mean, old_std, new_dist):
     """Exact W2 per observation for unclipped diagonal Gaussians (not squared).
 
     The vector norm has a zero subgradient at equality. Only the new policy
     receives gradients; rollout parameters stay frozen.
     """
-    delta = torch.cat((new_dist.mean - old_mean.detach(),
-                       new_dist.stddev - old_std.detach()), dim=-1)
+    delta = _wasserstein_delta(old_mean, old_std, new_dist.mean, new_dist.stddev)
     return torch.linalg.vector_norm(delta, dim=-1)
+
+
+def ot_action(old_mean, old_std, new_dist):
+    """Squared W2 on the four directional forces, excluding the no-op at index 0."""
+    delta = _wasserstein_delta(old_mean[..., 1:], old_std[..., 1:],
+                               new_dist.mean[..., 1:], new_dist.stddev[..., 1:])
+    return delta.square().sum(-1)
+
+
+def _movement_params(mean, std):
+    # Actions are [no-op, left, right, down, up]. Independent force variances add.
+    movement_mean = mean[..., 2::2] - mean[..., 1::2]
+    movement_std = torch.hypot(std[..., 2::2], std[..., 1::2])
+    return movement_mean, movement_std
+
+
+def ot_movement(old_mean, old_std, new_dist):
+    """Squared W2 between the induced horizontal and vertical movement Gaussians."""
+    old_m, old_s = _movement_params(old_mean.detach(), old_std.detach())
+    new_m, new_s = _movement_params(new_dist.mean, new_dist.stddev)
+    return _wasserstein_delta(old_m, old_s, new_m, new_s).square().sum(-1)
+
+
+PENALTY_DISTANCES = {
+    "kl": gaussian_kl,
+    "wasserstein-2": gaussian_wasserstein2,
+    "ot-action": ot_action,
+    "ot-movement": ot_movement,
+}
 
 
 def adapt_penalty_coef(coef, distance, target):
@@ -104,7 +136,7 @@ class PPO:
             old_dist = self.policy.dist(batch["obs"])
             old_mean = old_dist.mean.detach().clone()
             old_std = old_dist.stddev.detach().clone()
-        distance_fn = gaussian_wasserstein2 if a.penalty == "wasserstein-2" else gaussian_kl
+        distance_fn = PENALTY_DISTANCES[a.penalty] if a.penalty != "none" else None
         coef_used = self.beta if a.penalty != "none" else 0.0
         stats = []
         for _ in range(a.update_epochs):

@@ -17,7 +17,7 @@ import torch
 from envs.tag import ADV, GOOD
 from envs.fast_tag import make_vec_env
 from algos.networks import GaussianActorCritic
-from algos.ppo import PPO, compute_gae
+from algos.ppo import PENALTY_DISTANCES, PPO, compute_gae
 from algos.rollout import collect_rollout, learner_obs
 from opponents import make_opponent, load_policy, PoolOpponent
 from utils.evaluate import evaluate
@@ -161,7 +161,7 @@ def positive_float(value):
     return value
 
 
-def get_args(argv=None, create_dir=True):
+def argument_parser():
     p = argparse.ArgumentParser("Self-play PPO (Gaussian) on 1v1 MPE2 Simple Tag")
     p.add_argument("--total_steps", type=int, default=2_000_000, help="env steps (per-env transitions, summed over envs)")
     p.add_argument("--num_envs", type=int, default=8)
@@ -186,7 +186,7 @@ def get_args(argv=None, create_dir=True):
     p.add_argument("--clip_coef", type=float, default=0.1, help="shared policy and value clipping threshold")
     p.add_argument("--clip_policy", type=lambda s: s.lower() != "false", default=True,
                    help="enable policy-ratio clipping (true/false); independent of --clip_vloss")
-    p.add_argument("--penalty", choices=["none", "kl", "wasserstein-2"], default="none",
+    p.add_argument("--penalty", choices=["none", *PENALTY_DISTANCES], default="none",
                    help="adaptive Gaussian distance penalty (default: none)")
     p.add_argument("--penalty_target", type=positive_float, default=0.01,
                    help="target final selected distance for penalty adaptation; separate from --target_kl early stopping")
@@ -224,15 +224,29 @@ def get_args(argv=None, create_dir=True):
     p.add_argument("--eval_every", type=int, default=50, help="iterations between evals (0=off)")
     p.add_argument("--eval_episodes", type=int, default=50)
     p.add_argument("--out_dir", type=str, default="runs/selfplay_ppo")
-    a = p.parse_args(argv)
+    return p
+
+
+def finalize_args(a):
     if a.opponent in ("ckpt", "pool") and a.learner != "both" and not a.opponent_ckpt:
-        p.error(f"--opponent {a.opponent} requires --opponent_ckpt")
+        raise ValueError(f"--opponent {a.opponent} requires --opponent_ckpt")
     if a.algo == "fsp" and a.learner != "both":
-        p.error("--algo fsp trains both roles; do not combine it with --learner adv/good")
+        raise ValueError("--algo fsp trains both roles; do not combine it with --learner adv/good")
     if a.snapshot_every is None:
         a.snapshot_every = 50 if a.algo == "fsp" else 0
     if a.algo == "fsp" and a.snapshot_every <= 0:
-        p.error("--algo fsp needs --snapshot_every > 0")
+        raise ValueError("--algo fsp needs --snapshot_every > 0")
+    if a.algo == "fsp" and a.num_envs < 2:
+        raise ValueError("--algo fsp needs at least two environments because learner roles are assigned by environment")
+    return a
+
+
+def get_args(argv=None, create_dir=True):
+    p = argument_parser()
+    try:
+        a = finalize_args(p.parse_args(argv))
+    except ValueError as error:
+        p.error(str(error))
     if create_dir:
         a.out_dir = create_run_dir(a.out_dir)
     return a
