@@ -63,7 +63,7 @@ class SweepRegressions(unittest.TestCase):
                 (trial / 'candidate').mkdir(parents=True, exist_ok=True)
                 sweep.save(trial / 'candidate/config.json', {'mask_noop': True})
                 sweep.save(trial / 'candidate/complete.json', {'finished': True})
-                sweep.save(trial / 'metrics.json', dict(nashconv=0, adv={'gap': 0}, good={'gap': 0}))
+                sweep.save(trial / 'metrics.json', dict(backend='mpe', nashconv=0, adv={'gap': 0}, good={'gap': 0}))
             sweep.run(cfg, root, compare=False)
             self.assertEqual(json.loads((root / 'summary.json').read_text())['winner']['n_seeds'], 2)
             sweep.save(candidate / 'config.json', {'mask_noop': False})

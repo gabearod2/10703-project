@@ -32,7 +32,7 @@ def main():
     a = p.parse_args()
     dev = torch.device(a.device)
     torch.set_num_threads(a.threads)
-    sync = (lambda: torch.cuda.synchronize()) if dev.type == 'cuda' else (lambda: None)
+    sync = (lambda: torch.cuda.synchronize(dev)) if dev.type == 'cuda' else (lambda: None)
 
     print(f'{"envs":>5} {"ms/iter":>8} {"sps":>7} | {"env.step":>9} {"policy.act":>10} {"opponent":>9} {"glue":>7} {"gae":>6} {"update":>7}   (ms per iteration, share in %)')
     for n in a.num_envs:

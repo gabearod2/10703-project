@@ -16,6 +16,7 @@ import exploit
 from parallel import run_parallel
 from opponents import load_policy, PolicyOpponent, make_opponent
 from utils.evaluate import play_match
+from utils.measurement import read_measurement
 
 
 def save(path, value):
@@ -59,7 +60,7 @@ def expand(cfg):
             if args['total_steps'] < args['num_envs'] * args['num_steps']:
                 raise ValueError('Training budget is shorter than one rollout')
             result.append(args)
-    envs = {(a['symmetric'], a['zero_sum'], a['share_vel'], a['max_cycles']) for a in result}
+    envs = {(a['symmetric'], a['zero_sum'], a['share_vel'], a['max_cycles'], a['env_backend']) for a in result}
     if len(envs) > 1:
         raise ValueError('All sweep configurations must use the same game')
     if not result:
@@ -83,9 +84,9 @@ def run_trial(index, settings, seed, root, br):
                 train.train(Namespace(**args))
             save(candidate / 'complete.json', {'finished': True})
         b = br
-        if metrics_path.exists():
-            metric = json.loads(metrics_path.read_text())
-        else:
+        backend = exploit.env_options(exploit.load_cfg(candidate))['backend']
+        metric = read_measurement(metrics_path) if metrics_path.exists() else None
+        if metric is None or metric.get('backend') != backend:
             with (directory / 'exploit.log').open('w') as log, contextlib.redirect_stdout(log):
                 metric = exploit.nashconv(str(candidate), br_steps=b['steps'], br_seeds=b['seeds'],
                     seed=b['seed'], episodes=b['episodes'], eval_seed=b['eval_seed'], report_seed=b['report_seed'],
@@ -100,9 +101,8 @@ def run_trial(index, settings, seed, root, br):
             # Fictitious self-play: also score the AVERAGE policy (uniform mixture over candidate/pool),
             # which is the policy fictitious play's convergence guarantee is about.
             average_path = directory / 'metrics_avg.json'
-            if average_path.exists():
-                average = json.loads(average_path.read_text())
-            else:
+            average = read_measurement(average_path) if average_path.exists() else None
+            if average is None or average.get('backend') != backend:
                 with (directory / 'exploit_avg.log').open('w') as log, contextlib.redirect_stdout(log):
                     average = exploit.nashconv(str(candidate), br_steps=b['steps'], br_seeds=b['seeds'],
                         seed=b['seed'], episodes=b['episodes'], eval_seed=b['eval_seed'], report_seed=b['report_seed'],
@@ -210,13 +210,14 @@ def run(cfg, root, compare=True, jobs=1):
             if row['status'] != 'complete': continue
             policy = load_policy(row['checkpoint'], configurations[row['configuration']]['device'])
             opts = configurations[row['configuration']]
+            env_kw = exploit.env_options(exploit.load_cfg(row['checkpoint']))
             for role in (0, 1):
                 for name in ('random', 'scripted'):
                     ctrl = PolicyOpponent(policy, device=opts['device'])
                     opponent = make_opponent(name, role ^ 1, policy.low.numel(), seed=c['seed'])   # env action dim (policy's excludes masked no_op)
                     pair = (ctrl, opponent) if role == 0 else (opponent, ctrl)
                     m = play_match(*pair, c['episodes'], opts['max_cycles'], c['seed'], opts['symmetric'],
-                                   return_episodes=True, zero_sum=opts['zero_sum'], share_vel=opts['share_vel'])
+                                   return_episodes=True, **env_kw)
                     fixed.append(dict(configuration=row['configuration'], seed=row['seed'], role=role,
                                       opponent=name, mean=m['adv' if role==0 else 'good'],
                                       se=m['adv_se' if role==0 else 'good_se']))
