@@ -7,7 +7,7 @@ by how exploitable it is (best responses, cross-play), not only by its training 
 
 - `src/` holds all the code; **run every command below from `src/`**.
   - `train.py`: PPO / self-play training. `exploit.py`: exploitability and cross-play. `visualize.py`: GIFs and trajectory plots.
-  - `algos/`: PPO, rollouts, networks. `envs/tag.py`: vectorised Simple Tag. `opponents.py`: random, scripted and frozen-checkpoint
+  - `algos/`: PPO, rollouts, networks. `envs/tag.py`: vectorised Simple Tag (MPE2 reference). `envs/fast_tag.py`: batched NumPy copy of the same game, used by default (`--env_backend fast`, ~17-90x faster env steps; `tests/test_fast_env.py` checks step-by-step parity with MPE2, `--env_backend mpe` switches back). `opponents.py`: random, scripted and frozen-checkpoint
     opponents. `utils/`: evaluation and plotting. `tests/`: tests.
   - `hw3_reference/`: original HW3 starter code (Bronars & Jang), used only by the tests.
 - `papers/`: reference papers.

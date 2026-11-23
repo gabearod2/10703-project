@@ -181,8 +181,8 @@ def test_env_flags_flow_through():
     r = exploit.nashconv(cfg_dir, br_steps=128, br_seeds=1, episodes=4, out_dir=os.path.join(d, "x"),
                          br_args="--num_envs 2 --num_steps 32")
     assert r["zero_sum"] and r["share_vel"]
-    old = {k: v for k, v in vars(args).items() if k not in ("zero_sum", "share_vel")}                # run from before the flags existed
-    assert exploit.env_options(old) == {"zero_sum": False, "share_vel": False}
+    old = {k: v for k, v in vars(args).items() if k not in ("zero_sum", "share_vel", "env_backend")}                # run from before the flags existed
+    assert exploit.env_options(old) == {"backend": "mpe", "zero_sum": False, "share_vel": False}
     fz = PolicyOpponent(load_policy(cfg_dir), False)
     m = play_match(fz, fz, 6, 25, 5, True)
     assert abs(m["adv"] + m["good"]) < 1e-4                                                          # one match: returns sum to 0
