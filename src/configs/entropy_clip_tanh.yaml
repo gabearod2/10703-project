@@ -1,0 +1,49 @@
+# Entropy x clipping with the tanh-squashed policy and the squashed-action entropy bonus (PR #11).
+# clip {0.1, 0.2, 0.3} x ent_coef {0, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2}, 5 seeds = 21 configs, 105 trials.
+# Base = best Experiment 1 setting (4M steps, 8 minibatches). Configs run in order, so the clip 0.1 entropy curve
+# (configs 0-6) finishes first, then clip 0.2 (7-13), then clip 0.3 (14-20).
+# 12 jobs: this machine's throughput peaks around 10-13 parallel jobs (~2.5 trials/h); more jobs only slow each trial.
+#   python sweep.py --config configs/entropy_clip_tanh.yaml --out_dir runs/entropy_clip_tanh --jobs 12
+grid: {}
+variants:
+  - grid: {clip_coef: [0.1], ent_coef: [0.0, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2]}
+  - grid: {clip_coef: [0.2], ent_coef: [0.0, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2]}
+  - grid: {clip_coef: [0.3], ent_coef: [0.0, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2]}
+seeds: [0, 1, 2, 3, 4]
+fixed:
+  action_transform: tanh
+  penalty: none
+  clip_policy: true
+  lr: 0.00025
+  anneal_lr: true
+  num_envs: 8
+  num_steps: 128
+  num_minibatches: 8
+  update_epochs: 4
+  gamma: 0.99
+  gae_lambda: 0.95
+  vf_coef: 0.5
+  max_grad_norm: 0.5
+  norm_adv: true
+  clip_vloss: true
+  target_kl: null
+  hidden: [512, 512, 512]
+  total_steps: 4000000
+  zero_sum: true
+  share_vel: true
+  symmetric: true
+  max_cycles: 25
+  threads: 1
+  device: cpu
+br:                                   # best responses use the checkpoint's transform (tanh) automatically
+  steps: 1000000                      # 1M verified sufficient at 4M (3M changed NashConv by +0.10 +- 1.25)
+  seeds: 4
+  seed: 10000
+  episodes: 200
+  eval_seed: 100000
+  report_seed: 200000
+  init: warm
+  args: '--ent_coef 0 --clip_coef 0.1 --penalty none'
+comparisons:
+  episodes: 200
+  seed: 300000

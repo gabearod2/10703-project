@@ -14,7 +14,7 @@
     load and get a 5-dim best response; mismatched --init_ckpt is rejected.
 10. --algo fsp: trains, snapshots to <run>/pool, the pool grows; nashconv --average and crossplay accept the pool.
 """
-import os, sys, tempfile
+import glob, json, os, sys, tempfile
 SRC = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, SRC)
 
@@ -347,9 +347,28 @@ def test_mask_noop():
     print("PASS no_op masking (4-dim policy, env dim 0 == 0, entropy over 4 dims, old checkpoints, init mismatch rejected, visualize.py runs)")
 
 
+def test_br_uses_checkpoint_action_transform():
+    """A best response acts through the same transform as the checkpoint it warm-starts from (unless br_args says otherwise)."""
+    for mode, br_args, want in (("clip", "", "clip"), ("tanh", "", "tanh"), ("clip", "--action_transform tanh", "tanh")):
+        pol, path = save_tiny(4)
+        pol.action_transform = mode
+        torch.save(pol.state_dict(), path)
+        assert load_policy(path).action_transform == mode
+        out = tempfile.mkdtemp()
+        exploit.nashconv(path, br_steps=64, br_seeds=1, episodes=2, out_dir=out,
+                         br_args=f"--num_envs 2 --num_steps 32 {br_args}")
+        for role in ("adv", "good"):
+            (run,) = glob.glob(os.path.join(out, f"br_{role}_s0", "*", "config.json"))     # train.py adds a timestamped dir
+            cfg = json.load(open(run))
+            assert cfg["action_transform"] == want, (mode, br_args, role, cfg["action_transform"])
+            assert load_policy(os.path.dirname(run)).action_transform == want
+    print("PASS best response inherits the checkpoint's action transform")
+
+
 if __name__ == "__main__":
     test_load_and_make_opponent(); test_play_match_matches_evaluate(); test_opponent_gets_its_own_role_obs()
     test_train_vs_frozen_ckpt(); test_nashconv_smoke(); test_crossplay()
     test_zero_sum_and_share_vel(); test_env_flags_flow_through()
     test_pool_opponent(); test_per_env_roles_rollout(); test_fsp_end_to_end(); test_mask_noop()
+    test_br_uses_checkpoint_action_transform()
     print("\nALL OK")
