@@ -24,6 +24,43 @@ import train
 
 
 class TestLoss(unittest.TestCase):
+    def test_action_transform_and_entropy(self):
+        from algos.networks import GaussianActorCritic
+        from opponents import load_policy
+
+        policy = GaussianActorCritic(2, 5, np.zeros(5), np.ones(5), hidden=(4,))
+        z = torch.tensor([[12., -2., -.5, .5, 2.]])
+        torch.testing.assert_close(policy.to_env(z), (1 + z.tanh()) / 2)
+        mu = z.clone().requires_grad_()
+        log_std = torch.zeros_like(mu, requires_grad=True)
+        dist = torch.distributions.Normal(mu, log_std.exp())
+        with patch.object(dist, "rsample", return_value=mu):
+            ent = policy.entropy(dist)
+        expected = dist.entropy() + ((1 - z.tanh().square()) / 2).log()
+        torch.testing.assert_close(ent, expected[..., 1:].sum(-1))
+        with torch.no_grad():
+            mu.mul_(1000)
+        policy.entropy(dist).sum().backward()
+        for grad in (mu.grad, log_std.grad):
+            self.assertTrue(torch.isfinite(grad).all())
+            self.assertEqual(grad[0, 0].item(), 0.)
+            self.assertGreater(grad[..., 1:].abs().sum().item(), 0.)
+
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / "policy.pt"
+            for mode in ("tanh", "clip"):
+                policy.action_transform = mode
+                torch.save(policy.state_dict(), path)
+                loaded = load_policy(path)
+                self.assertEqual(loaded.action_transform, mode)
+                torch.testing.assert_close(loaded.to_env(z), policy.to_env(z))
+            legacy = policy.state_dict()
+            del legacy["_extra_state"]
+            torch.save(legacy, path)
+            loaded = load_policy(path)
+            torch.testing.assert_close(loaded.to_env(z), ((1 + z) / 2).clamp(0, 1))
+            torch.testing.assert_close(loaded.entropy(dist), dist.entropy().sum(-1))
+
     def test_tag_ot_values_and_gradients(self):
         # Rows change the no-op alone, both axes, cancelling means, or swapped stds.
         for distance_fn, expected in [(ot_action, [0., 93., 8., 2.]),
@@ -43,6 +80,16 @@ class TestLoss(unittest.TestCase):
                 self.assertTrue(torch.isfinite(grad).all())
                 self.assertTrue((grad[:, 0] == 0).all())
                 self.assertGreater(grad[1, 1:].abs().sum().item(), 0.)
+
+            # Removing the no-op must preserve both the cost and every directional gradient.
+            masked_mean = new_mean[..., 1:].detach().requires_grad_()
+            masked_std = new_std[..., 1:].detach().requires_grad_()
+            masked_dist = torch.distributions.Normal(masked_mean, masked_std)
+            masked_costs = distance_fn(old_mean[..., 1:], old_std[..., 1:], masked_dist)
+            torch.testing.assert_close(masked_costs, costs.detach())
+            masked_costs.sum().backward()
+            torch.testing.assert_close(masked_mean.grad, new_mean.grad[..., 1:])
+            torch.testing.assert_close(masked_std.grad, new_std.grad[..., 1:])
 
     def test_wasserstein_values_and_gradients(self):
         for mean, std, expected in [([0., 0.], [1., 1.], 0.),
@@ -136,6 +183,9 @@ class _ToyPolicy(torch.nn.Module):
         self.mean_weight = torch.nn.Parameter(torch.zeros(5))
         self.log_std = torch.nn.Parameter(torch.zeros(5))
         self.value_bias = torch.nn.Parameter(torch.zeros(()))
+
+    def entropy(self, dist):
+        return dist.entropy().sum(-1)
 
     def dist(self, obs):
         return torch.distributions.Normal(obs * self.mean_weight, self.log_std.exp())
@@ -295,7 +345,8 @@ class TestTrainingModes(unittest.TestCase):
                          "--total_steps", "512", "--num_envs", "2", "--num_steps", "32",
                          "--hidden", "16", "16", "--threads", "1", "--update_epochs", "2",
                          "--num_minibatches", "2", "--eval_every", "8", "--eval_episodes", "2",
-                         "--clip_policy", clip, "--penalty", kl],
+                         "--clip_policy", clip, "--penalty", kl,
+                         *(["--action_transform", "clip"] if kl == "none" else [])],
                         cwd=SRC, capture_output=True, text=True, timeout=120,
                     )
                     self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -306,6 +357,7 @@ class TestTrainingModes(unittest.TestCase):
                     self.assertEqual(cfg["out_dir"], str(run))
                     self.assertEqual(cfg["clip_policy"], clip == "true")
                     self.assertEqual(cfg["penalty"], kl)
+                    self.assertEqual(cfg["action_transform"], "clip" if kl == "none" else "tanh")
                     log = json.loads((run / "training_log.json").read_text())
                     for key in ("loss", "kl_exact_final", "penalty_coef_used", "penalty_coef_next", "penalty_loss", "penalty_distance_final"):
                         self.assertEqual(len(log[key]), 8)

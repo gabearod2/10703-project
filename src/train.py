@@ -46,13 +46,15 @@ def _train(args, env, device):
                                                            ckpt=args.opponent_ckpt, deterministic=args.opponent_deterministic)
 
     PA = A - 1 if args.mask_noop else A      # policy action dims: env dim 0 (no_op) does nothing, so it is masked by default
-    policy = GaussianActorCritic(D, PA, env.act_low, env.act_high, tuple(args.hidden), args.init_log_std).to(device)
+    policy = GaussianActorCritic(D, PA, env.act_low, env.act_high, tuple(args.hidden), args.init_log_std,
+                                 args.action_transform).to(device)
     if args.init_ckpt:                       # warm start (e.g. best response initialised from the policy it responds to)
         init = load_policy(args.init_ckpt)
         if init.act_dim != PA:
             raise ValueError(f"--init_ckpt has {init.act_dim} action dims but this run uses {PA}: "
                              + ("add --no_mask_noop" if args.mask_noop else "remove --no_mask_noop"))
         policy.load_state_dict(init.state_dict())
+        policy.action_transform = args.action_transform
     ppo = PPO(policy, args)
 
     # Fictitious self-play: the network still learns both roles, but in every env it controls ONE role (alternating by
@@ -200,6 +202,8 @@ def argument_parser():
     p.add_argument("--target_kl", type=float, default=None,
                    help="optional approximate-KL early stopping threshold; independent of penalty adaptation")
     p.add_argument("--hidden", type=int, nargs="+", default=[512, 512, 512])
+    p.add_argument("--action_transform", choices=("tanh", "clip"), default="tanh",
+                   help="tanh with directional action entropy, or legacy hard clipping with Gaussian entropy")
     p.add_argument("--init_log_std", type=float, default=-0.5)
     p.add_argument("--learner", choices=["both", "adv", "good"], default="both",
                    help="both = self-play (default). adv/good = only that role learns vs a fixed --opponent")
