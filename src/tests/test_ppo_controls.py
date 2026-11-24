@@ -44,6 +44,16 @@ class TestLoss(unittest.TestCase):
                 self.assertTrue((grad[:, 0] == 0).all())
                 self.assertGreater(grad[1, 1:].abs().sum().item(), 0.)
 
+            # Removing the no-op must preserve both the cost and every directional gradient.
+            masked_mean = new_mean[..., 1:].detach().requires_grad_()
+            masked_std = new_std[..., 1:].detach().requires_grad_()
+            masked_dist = torch.distributions.Normal(masked_mean, masked_std)
+            masked_costs = distance_fn(old_mean[..., 1:], old_std[..., 1:], masked_dist)
+            torch.testing.assert_close(masked_costs, costs.detach())
+            masked_costs.sum().backward()
+            torch.testing.assert_close(masked_mean.grad, new_mean.grad[..., 1:])
+            torch.testing.assert_close(masked_std.grad, new_std.grad[..., 1:])
+
     def test_wasserstein_values_and_gradients(self):
         for mean, std, expected in [([0., 0.], [1., 1.], 0.),
                                     ([3., 4.], [1., 1.], 5.),

@@ -47,16 +47,17 @@ def gaussian_wasserstein2(old_mean, old_std, new_dist):
 
 
 def ot_action(old_mean, old_std, new_dist):
-    """Squared W2 on the four directional forces, excluding the no-op at index 0."""
-    delta = _wasserstein_delta(old_mean[..., 1:], old_std[..., 1:],
-                               new_dist.mean[..., 1:], new_dist.stddev[..., 1:])
+    """Squared W2 on the four directional forces, ignoring the optional leading no-op."""
+    delta = _wasserstein_delta(old_mean[..., -4:], old_std[..., -4:],
+                               new_dist.mean[..., -4:], new_dist.stddev[..., -4:])
     return delta.square().sum(-1)
 
 
 def _movement_params(mean, std):
-    # Actions are [no-op, left, right, down, up]. Independent force variances add.
-    movement_mean = mean[..., 2::2] - mean[..., 1::2]
-    movement_std = torch.hypot(std[..., 2::2], std[..., 1::2])
+    # Both policy layouts end in [left, right, down, up].
+    mean, std = mean[..., -4:], std[..., -4:]
+    movement_mean = mean[..., 1::2] - mean[..., ::2]
+    movement_std = torch.hypot(std[..., 1::2], std[..., ::2])
     return movement_mean, movement_std
 
 
