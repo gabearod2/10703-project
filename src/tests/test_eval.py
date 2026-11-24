@@ -309,8 +309,13 @@ def test_mask_noop():
     assert e4.shape == (7, 5) and torch.all(e4[:, 0] == 0) and torch.allclose(e4[:, 1:], e5[:, 1:])   # live dims as before
     assert e4.min() >= 0 and e4.max() <= 1
     x = torch.randn(3, env.obs_dim)
+    torch.manual_seed(42)
     lp, ent, _ = m4.evaluate(x, a[:3])
-    assert torch.allclose(ent, torch.distributions.Normal(0, m4.log_std.exp()).entropy().sum().expand(3))   # 4 dims only
+    torch.manual_seed(42)
+    dist = m4.dist(x)
+    z = dist.rsample()
+    expected = dist.entropy() + torch.log(0.5 * (1 - z.tanh().square()))
+    torch.testing.assert_close(ent, expected.sum(-1))
     d = tempfile.mkdtemp()
     args = T.get_args(["--total_steps", "256", "--num_envs", "2", "--num_steps", "32", "--hidden", *map(str, HID),
                        "--eval_every", "1", "--eval_episodes", "2", "--out_dir", d])

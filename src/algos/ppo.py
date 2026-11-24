@@ -149,7 +149,7 @@ class PPO:
                     adv = (adv - adv.mean()) / (adv.std() + 1e-8)
                 new_dist = self.policy.dist(batch["obs"][idx])
                 new_logp = new_dist.log_prob(batch["act"][idx]).sum(-1)
-                ent = new_dist.entropy().sum(-1)
+                ent = self.policy.entropy(new_dist)
                 new_v = self.policy.value(batch["obs"][idx])
                 distance = distance_fn(old_mean[idx], old_std[idx], new_dist) if a.penalty != "none" else None
                 loss, st = ppo_loss(new_logp, batch["logp"][idx], adv, new_v, batch["val"][idx], batch["ret"][idx],

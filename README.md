@@ -67,6 +67,10 @@ Every PPO hyperparameter is a flag; `python train.py -h` lists them all.
 Each run saves `config.json`, `training_log.json`, `training_curves.png`, `latest.pt` and `final.pt`
 to `<out_dir>/<timestamp>-<uuid>/`
 
+New policies use `--action_transform tanh` by default. PPO estimates entropy on the four squashed directional actions.
+Use `--action_transform clip` for hard clipping and the original Gaussian entropy bonus. Evaluation restores the
+checkpoint transform (clip for legacy files). Warm starts use the transform selected for the new run.
+
 ## Policy clipping and adaptive penalties
 
 Policy clipping and the adaptive distance penalty have independent switches:
