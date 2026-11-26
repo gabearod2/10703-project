@@ -64,12 +64,16 @@ class GaussianActorCritic(nn.Module):
         mu = self.actor_mean(obs)
         return torch.distributions.Normal(mu, self.log_std.exp().expand_as(mu))
 
-    def to_env(self, a):
-        """Map a latent Gaussian action into environment units."""
-        low, high = self.low[-self.act_dim:], self.high[-self.act_dim:]
+    def transform_action(self, a):
+        """Map latent coordinates into the corresponding trailing environment bounds."""
+        low, high = self.low[-a.shape[-1]:], self.high[-a.shape[-1]:]
         if self.action_transform == "tanh":
             a = a.tanh()
-        x = torch.clamp(low + 0.5 * (a + 1.0) * (high - low), low, high)
+        return torch.clamp(low + 0.5 * (a + 1.0) * (high - low), low, high)
+
+    def to_env(self, a):
+        """Map a latent Gaussian action into environment units."""
+        x = self.transform_action(a)
         return torch.cat((torch.zeros_like(x[..., :1]), x), dim=-1) if self.mask_noop else x
 
     @torch.no_grad()

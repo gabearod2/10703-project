@@ -1,5 +1,7 @@
 # algos/ppo.py
 """PPO: GAE, optional policy clipping / adaptive distance penalty, and minibatch updates."""
+from functools import partial
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -68,6 +70,47 @@ def ot_movement(old_mean, old_std, new_dist):
     return _wasserstein_delta(old_m, old_s, new_m, new_s).square().sum(-1)
 
 
+def _directional_samples(mean, std, noise, transform):
+    return transform(mean[..., None, -4:] + std[..., None, -4:] * noise)
+
+
+def tanh_action(old_mean, old_std, new_dist, *, transform, noise, weights):
+    """Squared directional W2 via quadrature of the monotone Gaussian coupling."""
+    old = _directional_samples(old_mean.detach(), old_std.detach(), noise, transform)
+    new = _directional_samples(new_dist.mean, new_dist.stddev, noise, transform)
+    return ((new - old).square().sum(-1) * weights).sum(-1)
+
+
+def tanh_movement(old_mean, old_std, new_dist, *, transform, noise):
+    """Sum empirical one-dimensional W2 squared over the two independent axes."""
+    def sorted_movement(mean, std):
+        actions = _directional_samples(mean, std, noise, transform)
+        movement = actions[..., 1::2] - actions[..., ::2]
+        return movement.sort(dim=-2).values
+
+    old = sorted_movement(old_mean.detach(), old_std.detach())
+    new = sorted_movement(new_dist.mean, new_dist.stddev)
+    return (new - old).square().sum(-1).mean(-1)
+
+
+def tanh_distance_for_update(mode, policy, seed):
+    """Bind one integration rule to the whole PPO update, including adaptation."""
+    if policy.action_transform != "tanh":
+        raise ValueError(f"{mode} requires --action_transform tanh")
+    if mode == "tanh-action":
+        nodes, weights = np.polynomial.hermite.hermgauss(32)
+        return partial(tanh_action, transform=policy.transform_action,
+                       noise=policy.low.new_tensor(np.sqrt(2) * nodes[:, None]),
+                       weights=policy.low.new_tensor(weights / np.sqrt(np.pi)))
+    engine = torch.quasirandom.SobolEngine(4, scramble=True, seed=seed)
+    uniforms = engine.draw_base2(7, dtype=torch.float64)
+    eps = torch.finfo(uniforms.dtype).eps
+    noise = torch.special.ndtri(uniforms.clamp(eps, 1 - eps)).to(policy.low)
+    return partial(tanh_movement, transform=policy.transform_action, noise=noise)
+
+
+TANH_PENALTIES = ("tanh-action", "tanh-movement")
+
 PENALTY_DISTANCES = {
     "kl": gaussian_kl,
     "wasserstein-2": gaussian_wasserstein2,
@@ -88,7 +131,7 @@ def adapt_penalty_coef(coef, distance, target):
 def ppo_loss(new_logp, old_logp, adv, new_v, old_v, ret, entropy,
              clip_coef, vf_coef, ent_coef, clip_vloss=True, *,
              clip_policy=True, distance=None, penalty_coef=0.0):
-    """Optional per-sample analytical distance adds a differentiable penalty to the loss."""
+    """Optional per-sample policy distance adds a differentiable penalty to the loss."""
     ratio = (new_logp - old_logp).exp()
     if clip_policy:
         pg_loss = torch.max(-adv * ratio, -adv * torch.clamp(ratio, 1 - clip_coef, 1 + clip_coef)).mean()
@@ -116,6 +159,7 @@ class PPO:
     def __init__(self, policy, args):
         self.policy, self.args = policy, args
         self.opt = torch.optim.Adam(policy.parameters(), lr=args.lr, eps=1e-5)
+        self.update_index = 0
         self.beta = args.penalty_coef_init
 
     def set_lr(self, lr):
@@ -137,7 +181,12 @@ class PPO:
             old_dist = self.policy.dist(batch["obs"])
             old_mean = old_dist.mean.detach().clone()
             old_std = old_dist.stddev.detach().clone()
-        distance_fn = PENALTY_DISTANCES[a.penalty] if a.penalty != "none" else None
+        squashed = a.penalty in TANH_PENALTIES
+        if squashed:
+            distance_fn = tanh_distance_for_update(a.penalty, self.policy, a.seed + self.update_index)
+        else:
+            distance_fn = PENALTY_DISTANCES[a.penalty] if a.penalty != "none" else None
+        self.update_index += 1
         coef_used = self.beta if a.penalty != "none" else 0.0
         stats = []
         for _ in range(a.update_epochs):
@@ -165,8 +214,16 @@ class PPO:
         with torch.no_grad():
             final_dist = self.policy.dist(batch["obs"])
             final_kl = gaussian_kl(old_mean, old_std, final_dist).mean().item()
-            final_distance = (distance_fn(old_mean, old_std, final_dist).mean().item()
-                              if a.penalty != "none" else 0.0)
+            if squashed:
+                costs = []
+                for start in range(0, n, 256):
+                    chunk = slice(start, start + 256)
+                    dist = torch.distributions.Normal(final_dist.mean[chunk], final_dist.stddev[chunk])
+                    costs.append(distance_fn(old_mean[chunk], old_std[chunk], dist).sum())
+                final_distance = (torch.stack(costs).sum() / n).item()
+            else:
+                final_distance = (distance_fn(old_mean, old_std, final_dist).mean().item()
+                                  if a.penalty != "none" else 0.0)
         if a.penalty != "none":
             self.beta = adapt_penalty_coef(self.beta, final_distance, a.penalty_target)
         out.update(penalty_distance_final=final_distance, kl_exact_final=final_kl, penalty_coef_used=coef_used,
