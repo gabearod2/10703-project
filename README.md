@@ -101,6 +101,23 @@ no-op at action index 0 and use squared-distance units for `--penalty_target`.
 - `--penalty ot-movement` uses squared W2 on the net force (right − left, up − down).
   Each axis has variance equal to the sum of its two independent force variances.
 
+Two additional penalties require `--action_transform tanh` (the default) and measure changes in executed action units.
+Both exclude the no-op and sum squared distances across coordinates for each observation.
+
+- `--penalty tanh-action` integrates the squared difference between matching directional action quantiles using 32-point Gauss–Hermite quadrature.
+- `--penalty tanh-movement` generates 128 shared scrambled Sobol samples, squashes the directions, and sorts net forces on each axis to estimate squared W2. The samples are fixed throughout each PPO update, including its final adaptive measurement.
+
+Use separate target grids because squared changes in directional action and squared changes in net force have different scales.
+For example, these sweep variants specify illustrative targets:
+
+```yaml
+variants:
+  - fixed: {penalty: tanh-action}
+    grid: {penalty_target: [0.001, 0.01]}
+  - fixed: {penalty: tanh-movement}
+    grid: {penalty_target: [0.0005, 0.005]}
+```
+
 `--target_kl` is the existing, separate **approximate-KL early-stopping threshold**, disabled by default.
 
 `training_log.json` metrics:

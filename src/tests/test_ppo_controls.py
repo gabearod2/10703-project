@@ -324,7 +324,7 @@ class TestRunConfiguration(unittest.TestCase):
             self.assertEqual(defaults.penalty_target, .01)
             self.assertEqual(defaults.penalty_coef_init, 1.)
             self.assertIsNone(defaults.target_kl)
-            for clip, kl in [(c, m) for c in ("false", "true") for m in ("none", "kl", "wasserstein-2", "ot-action", "ot-movement")]:
+            for clip, kl in [(c, m) for c in ("false", "true") for m in ("none", "kl", "wasserstein-2", "ot-action", "ot-movement", "tanh-action", "tanh-movement")]:
                 args = train.get_args(["--out_dir", root, "--clip_policy", clip, "--penalty", kl])
                 self.assertEqual(args.clip_policy, clip == "true")
                 self.assertEqual(args.penalty, kl)
@@ -337,7 +337,7 @@ class TestTrainingModes(unittest.TestCase):
         from algos.networks import GaussianActorCritic
 
         with tempfile.TemporaryDirectory() as root:
-            for clip, kl in [(c, m) for c in ("false", "true") for m in ("none", "kl", "wasserstein-2", "ot-action", "ot-movement")]:
+            for clip, kl in [(c, m) for c in ("false", "true") for m in ("none", "kl", "wasserstein-2", "ot-action", "ot-movement", "tanh-action", "tanh-movement")]:
                 with self.subTest(clip=clip, kl=kl):
                     base = Path(root) / f"clip_{clip}_kl_{kl}"
                     result = subprocess.run(

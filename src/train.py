@@ -17,7 +17,7 @@ import torch
 from envs.tag import ADV, GOOD
 from envs.fast_tag import make_vec_env
 from algos.networks import GaussianActorCritic
-from algos.ppo import PENALTY_DISTANCES, PPO, compute_gae
+from algos.ppo import PENALTY_DISTANCES, TANH_PENALTIES, PPO, compute_gae
 from algos.rollout import collect_rollout, learner_obs
 from opponents import make_opponent, load_policy, PoolOpponent
 from utils.evaluate import evaluate
@@ -188,8 +188,8 @@ def argument_parser():
     p.add_argument("--clip_coef", type=float, default=0.1, help="shared policy and value clipping threshold")
     p.add_argument("--clip_policy", type=lambda s: s.lower() != "false", default=True,
                    help="enable policy-ratio clipping (true/false); independent of --clip_vloss")
-    p.add_argument("--penalty", choices=["none", *PENALTY_DISTANCES], default="none",
-                   help="adaptive Gaussian distance penalty (default: none)")
+    p.add_argument("--penalty", choices=["none", *PENALTY_DISTANCES, *TANH_PENALTIES], default="none",
+                   help="adaptive policy distance penalty (default: none)")
     p.add_argument("--penalty_target", type=positive_float, default=0.01,
                    help="target final selected distance for penalty adaptation; separate from --target_kl early stopping")
     p.add_argument("--penalty_coef_init", type=positive_float, default=1.0,
@@ -232,6 +232,8 @@ def argument_parser():
 
 
 def finalize_args(a):
+    if a.penalty in TANH_PENALTIES and a.action_transform != "tanh":
+        raise ValueError(f"--penalty {a.penalty} requires --action_transform tanh")
     if a.opponent in ("ckpt", "pool") and a.learner != "both" and not a.opponent_ckpt:
         raise ValueError(f"--opponent {a.opponent} requires --opponent_ckpt")
     if a.algo == "fsp" and a.learner != "both":
