@@ -2,16 +2,16 @@
 # In fsp only one agent per env learns, so 16 envs x 8M env steps matches self-play's 8 envs x 4M steps in samples per
 # update (2048) and number of updates (3906). snapshot_every 100 keeps the pool at ~39 members, as in the old FSP config.
 # Scored twice with the self-play sweep's best-response settings: final policy (nashconv) and average policy (nashconv_avg).
-# BEFORE LAUNCHING: set clip_coef and ent_coef to the best configuration of the whole runs/entropy_clip_tanh sweep.
+# clip_coef and ent_coef: best configuration of the whole runs/entropy_clip_tanh sweep (clip 0.2, ent 0).
 #   python sweep.py --config configs/fsp_tanh.yaml --out_dir runs/fsp_tanh --jobs 5
 grid:
-  ent_coef: [0.01]                    # placeholder: best entropy from the self-play sweep
+  ent_coef: [0.0]                     # best of runs/entropy_clip_tanh: clip 0.2, ent 0 (NashConv 2.9 +- 2.1)
 seeds: [0, 1, 2, 3, 4]
 fixed:
   algo: fsp
   snapshot_every: 100
   action_transform: tanh
-  clip_coef: 0.1                      # placeholder: best clip from the self-play sweep
+  clip_coef: 0.2                      # best of runs/entropy_clip_tanh
   penalty: none
   clip_policy: true
   lr: 0.00025
