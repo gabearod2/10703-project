@@ -1,0 +1,51 @@
+# Follow-up to runs/penalty_screen_tanh (KL 0.01 best at 1.9 +- 0.6; both W2 winners sat at their smallest target).
+# Part 1 (configs 0-2): best target per distance WITH ratio clipping (clip 0.2), 5 seeds.
+# Part 2 (configs 3-4): edge check, one smaller target per W2 distance, clipping off, 5 seeds.
+# 5 configs x 5 seeds = 25 trials (~9.5 h at 12 jobs). Configs run in order, so part 1 finishes first.
+#   python sweep.py --config configs/penalty_followup_tanh.yaml --out_dir runs/penalty_followup_tanh --jobs 12
+grid: {}
+variants:
+  - grid: {penalty: [kl], penalty_target: [0.01], clip_policy: [true]}
+  - grid: {penalty: [tanh-action], penalty_target: [0.0002], clip_policy: [true]}
+  - grid: {penalty: [tanh-movement], penalty_target: [0.00005], clip_policy: [true]}
+  - grid: {penalty: [tanh-action], penalty_target: [0.00007], clip_policy: [false]}
+  - grid: {penalty: [tanh-movement], penalty_target: [0.00002], clip_policy: [false]}
+seeds: [0, 1, 2, 3, 4]
+fixed:
+  action_transform: tanh
+  clip_coef: 0.2
+  ent_coef: 0.0
+  penalty_coef_init: 1.0
+  lr: 0.00025
+  anneal_lr: true
+  num_envs: 8
+  num_steps: 128
+  num_minibatches: 8
+  update_epochs: 4
+  gamma: 0.99
+  gae_lambda: 0.95
+  vf_coef: 0.5
+  max_grad_norm: 0.5
+  norm_adv: true
+  clip_vloss: true
+  target_kl: null
+  hidden: [512, 512, 512]
+  total_steps: 4000000
+  zero_sum: true
+  share_vel: true
+  symmetric: true
+  max_cycles: 25
+  threads: 1
+  device: cpu
+br:                                   # identical to the entropy x clipping sweep so NashConv is comparable
+  steps: 1000000
+  seeds: 4
+  seed: 10000
+  episodes: 200
+  eval_seed: 100000
+  report_seed: 200000
+  init: warm
+  args: '--ent_coef 0 --clip_coef 0.1 --penalty none'
+comparisons:
+  episodes: 200
+  seed: 300000
