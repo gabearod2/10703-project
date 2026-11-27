@@ -1,0 +1,53 @@
+# Adaptive KL vs. Wasserstein penalty screen on the tanh policy, ratio clipping OFF (penalty is the only trust region).
+# {kl, tanh-action, tanh-movement} x 3 targets x 3 seeds = 9 configs, 27 trials.
+# Base = best entropy x clipping result (ent 0; clip_coef 0.2 still sets value clipping, clip_vloss true).
+# Targets differ per distance: the default 0.01 is far above what the squashed W2 distances reach, so their coefficient
+# halves every update to ~1e-17 and the penalty switches off (measured 2026-11-26, 150k-step smoke runs).
+# At the same update, tanh-action ~ 0.07 x KL and tanh-movement ~ 0.015 x KL, so each target triple is roughly the
+# KL triple {0.003, 0.01, 0.03} rescaled. kl_exact_final is logged for every run to compare at matched KL.
+#   python sweep.py --config configs/penalty_screen_tanh.yaml --out_dir runs/penalty_screen_tanh --jobs 12
+grid: {}
+variants:
+  - grid: {penalty: [kl], penalty_target: [0.003, 0.01, 0.03]}
+  - grid: {penalty: [tanh-action], penalty_target: [0.0002, 0.0007, 0.002]}
+  - grid: {penalty: [tanh-movement], penalty_target: [0.00005, 0.00015, 0.0005]}
+seeds: [0, 1, 2]
+fixed:
+  action_transform: tanh
+  clip_policy: false
+  clip_coef: 0.2
+  ent_coef: 0.0
+  penalty_coef_init: 1.0
+  lr: 0.00025
+  anneal_lr: true
+  num_envs: 8
+  num_steps: 128
+  num_minibatches: 8
+  update_epochs: 4
+  gamma: 0.99
+  gae_lambda: 0.95
+  vf_coef: 0.5
+  max_grad_norm: 0.5
+  norm_adv: true
+  clip_vloss: true
+  target_kl: null
+  hidden: [512, 512, 512]
+  total_steps: 4000000
+  zero_sum: true
+  share_vel: true
+  symmetric: true
+  max_cycles: 25
+  threads: 1
+  device: cpu
+br:                                   # identical to the entropy x clipping sweep so NashConv is comparable
+  steps: 1000000
+  seeds: 4
+  seed: 10000
+  episodes: 200
+  eval_seed: 100000
+  report_seed: 200000
+  init: warm
+  args: '--ent_coef 0 --clip_coef 0.1 --penalty none'
+comparisons:
+  episodes: 200
+  seed: 300000
